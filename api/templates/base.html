@@ -1,0 +1,264 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buffalo{{block "title" .}}{{end}}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        @font-face {
+            font-family: 'Centaur';
+            src: url('/fonts/centaur.woff2') format('woff2');
+            font-weight: 400;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --primary: #108cf8;
+            --primary-dark: #1267cf;
+            --primary-light: #4da6ff;
+            --dark: #000014;
+            --dark-2: #06091a;
+            --dark-3: #0d1a30;
+            --white: #ffffff;
+            --gray-1: #334155;
+            --gray-2: #64748b;
+            --gray-3: #94a3b8;
+            --gray-4: #cbd5e1;
+            --gray-5: #e8ecf1;
+            --gray-6: #f4f6f9;
+            --font-serif: 'Centaur', 'EB Garamond', 'Georgia', serif;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            display: flex;
+            background: var(--dark);
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* ── Brand panel ── */
+        .brand-panel {
+            flex: 1;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px;
+            background: linear-gradient(160deg, #000014 0%, #04071a 35%, #0a1225 70%, #0d1a30 100%);
+            overflow: hidden;
+        }
+        .brand-panel::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image:
+                radial-gradient(1px 1px at 12% 20%, rgba(255,255,255,0.06), transparent),
+                radial-gradient(1px 1px at 38% 70%, rgba(255,255,255,0.04), transparent),
+                radial-gradient(1px 1px at 65% 12%, rgba(255,255,255,0.05), transparent),
+                radial-gradient(1px 1px at 82% 55%, rgba(255,255,255,0.03), transparent),
+                radial-gradient(1px 1px at 25% 85%, rgba(255,255,255,0.04), transparent),
+                radial-gradient(1px 1px at 52% 35%, rgba(255,255,255,0.05), transparent),
+                radial-gradient(1px 1px at 90% 80%, rgba(255,255,255,0.03), transparent),
+                radial-gradient(1px 1px at 8% 50%, rgba(255,255,255,0.04), transparent);
+            background-size: 400px 400px;
+            animation: drift 60s linear infinite;
+            opacity: 0.7;
+        }
+        @keyframes drift { from { transform: translateY(0); } to { transform: translateY(-400px); } }
+        .brand-panel::after {
+            content: '';
+            position: absolute;
+            top: 45%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 600px; height: 600px;
+            background: radial-gradient(circle, rgba(16,140,248,0.05) 0%, rgba(16,140,248,0.02) 40%, transparent 65%);
+            border-radius: 50%;
+        }
+        .brand-center {
+            position: relative; z-index: 2;
+            display: flex; flex-direction: column; align-items: center; text-align: center;
+        }
+        .brand-center img { width: 120px; height: auto; margin-bottom: 28px; opacity: 0.9; }
+        .brand-name {
+            font-family: var(--font-serif);
+            font-size: 52px; font-weight: 400; color: var(--white);
+            letter-spacing: 6px; text-transform: uppercase; margin-bottom: 14px;
+        }
+        .brand-tagline {
+            font-family: var(--font-sans);
+            font-size: 11px; color: rgba(255,255,255);
+            text-transform: uppercase; letter-spacing: 5px; font-weight: 400;
+        }
+        .brand-divider {
+            width: 40px; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+            margin: 36px 0;
+        }
+        .brand-footer {
+            position: absolute; bottom: 36px; left: 0; right: 0;
+            text-align: center; z-index: 2;
+        }
+        .brand-footer p {
+            font-family: var(--font-sans);
+            font-size: 10px; color: rgba(255,255,255);
+            letter-spacing: 3px; text-transform: uppercase; font-weight: 400;
+        }
+
+        /* ── Login panel ── */
+        .login-panel {
+            width: 520px; min-width: 520px;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            padding: 60px; background: var(--white); position: relative;
+        }
+        .login-panel::before {
+            content: ''; position: absolute; top: 0; left: 0;
+            width: 2px; height: 100%;
+            background: linear-gradient(to bottom, var(--primary), var(--primary-dark), transparent);
+            opacity: 0.8;
+        }
+        .login-container { width: 100%; max-width: 360px; }
+
+        /* ── Header ── */
+        .login-header { margin-bottom: 44px; }
+        .login-header h2 {
+            font-family: var(--font-serif);
+            font-size: 28px; font-weight: 400; color: var(--dark); margin-bottom: 10px;
+            letter-spacing: 0.5px;
+        }
+        .login-header p {
+            font-size: 13px; color: var(--gray-2); line-height: 1.6; font-weight: 400;
+        }
+
+        /* ── Form ── */
+        .form-group { margin-bottom: 22px; }
+        .form-group label {
+            display: block; font-size: 12px; font-weight: 500;
+            color: var(--gray-1); margin-bottom: 7px;
+            letter-spacing: 0.3px; text-transform: uppercase;
+        }
+        .input-wrapper {
+            position: relative; display: flex; align-items: center;
+        }
+        .input-wrapper input {
+            width: 100%; padding: 13px 16px;
+            border: 1px solid var(--gray-5); border-radius: 6px;
+            font-size: 14px; font-family: var(--font-sans); color: var(--dark);
+            transition: border-color 0.2s, box-shadow 0.2s; outline: none;
+            background: var(--gray-6);
+        }
+        .input-wrapper input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(16,140,248,0.08);
+            background: var(--white);
+        }
+        .input-wrapper input::placeholder { color: var(--gray-3); font-weight: 400; }
+        .input-wrapper .input-toggle {
+            position: absolute; right: 12px; background: none; border: none;
+            cursor: pointer; color: var(--gray-3); padding: 4px;
+            display: flex; align-items: center; justify-content: center;
+            transition: color 0.15s;
+        }
+        .input-wrapper .input-toggle:hover { color: var(--gray-1); }
+
+        .form-group.error .input-wrapper input { border-color: #ef4444; background: #fefbfb; }
+        .form-group.error .input-wrapper .input-toggle { color: #ef4444; }
+        .error-message { display: none; font-size: 12px; color: #ef4444; margin-top: 6px; font-weight: 400; }
+        .form-group.error .error-message { display: block; }
+
+        /* ── Alerts ── */
+        .alert-error {
+            background: #fefbfb; border: 1px solid #fecaca; color: #991b1b;
+            padding: 12px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 24px;
+            font-weight: 400;
+        }
+        .alert-error:empty { display: none; }
+        .success-message {
+            background: #f7fdf9; border: 1px solid #d1fae5; color: #065f46;
+            padding: 12px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 24px;
+            display: none; font-weight: 400;
+        }
+
+        /* ── Buttons & links ── */
+        .btn-primary {
+            width: 100%; padding: 13px;
+            background: var(--primary); color: var(--white);
+            border: none; border-radius: 6px;
+            font-size: 13px; font-weight: 500; font-family: var(--font-sans);
+            cursor: pointer; transition: background 0.2s, transform 0.1s;
+            letter-spacing: 0.3px;
+        }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-primary:active { transform: scale(0.985); }
+
+        .form-options {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 28px;
+        }
+        .remember-me {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 13px; color: var(--gray-2); cursor: pointer;
+        }
+        .remember-me input[type="checkbox"] {
+            width: 15px; height: 15px; accent-color: var(--primary);
+        }
+        .forgot-link {
+            font-size: 12px; color: var(--primary); text-decoration: none; font-weight: 500;
+            letter-spacing: 0.2px;
+        }
+        .forgot-link:hover { color: var(--primary-dark); }
+        .back-link {
+            display: block; text-align: center; margin-top: 28px;
+            font-size: 12px; color: var(--gray-3); text-decoration: none;
+            letter-spacing: 0.2px; transition: color 0.15s;
+        }
+        .back-link:hover { color: var(--primary); }
+
+        .powered-by {
+            position: absolute; bottom: 24px; left: 0; right: 0;
+            text-align: center; font-size: 10px; color: var(--gray-10); letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+        .powered-by span { font-weight: 500; color: var(--gray-1); }
+
+        /* ── Responsive ── */
+        @media (max-width: 1024px) {
+            .brand-panel { display: none; }
+            .login-panel { width: 100%; min-width: unset; }
+        }
+        @media (max-width: 480px) {
+            .login-panel { padding: 40px 24px; }
+        }
+    </style>
+    {{block "head" .}}{{end}}
+</head>
+<body>
+    <div class="brand-panel">
+        <div class="brand-center">
+            <div class="brand-name">Buffalo</div>
+            <div class="brand-tagline">Identity Provider</div>
+            {{block "brandExtra" .}}<div class="brand-divider"></div>{{end}}
+        </div>
+        <div class="brand-footer">
+            <p>Powered by Arkad Business Solutions</p>
+        </div>
+    </div>
+
+    <div class="login-panel">
+        <div class="login-container">
+            {{template "content" .}}
+        </div>
+        <div class="powered-by">Secured by <span>Buffalo</span></div>
+    </div>
+</body>
+</html>{{end}}

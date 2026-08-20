@@ -1,0 +1,7 @@
+url: "http://localhost:8089"
+apps:
+  app1:
+    clientID: "huwh8y3892njsi"
+    clientSecret: "hia9eu9242048hiwefhkdnc23u9273ufiewhkenmasxy"
+    issuer: "http://localhost:8089"
+    redirectURIs: ["http://localhost:8086/oidc/callback"]

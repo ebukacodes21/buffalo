@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS audit_events;
+DROP TABLE IF EXISTS password_resets;
+DROP TABLE IF EXISTS email_verifications;
+DROP TABLE IF EXISTS refresh_tokens;
+DROP TABLE IF EXISTS auth_codes;
+DROP TABLE IF EXISTS oauth_clients;
+DROP TABLE IF EXISTS org_members;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS organizations;
