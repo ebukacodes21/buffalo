@@ -1,14 +1,17 @@
 package api
 
 import (
-	"buffalo/tooling"
-	"buffalo/users"
 	"embed"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
+
+	"github.com/ebukacodes21/buffalo/tooling"
+	"github.com/ebukacodes21/buffalo/users"
 )
 
 //go:embed templates/*.html
@@ -28,14 +31,14 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		err := r.ParseForm()
 		if err != nil {
-			apiError(w, http.StatusBadRequest, fmt.Errorf("parse form error: %s", err))
+			a.loginError(w, r, "", "Something went wrong. Please try again.")
 			return
 		}
 
 		sessID := r.PostForm.Get("sessionID")
 		payload, ok := a.SessionPool[sessID]
 		if !ok {
-			apiError(w, http.StatusNotFound, fmt.Errorf("session not found"))
+			a.loginError(w, r, "", "Your sign-in session has expired. Please restart the sign-in from the application.")
 			return
 		}
 
@@ -43,24 +46,20 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 		password := r.PostForm.Get("password")
 
 		user, err := a.Users.GetByEmail(login)
-		if err != nil {
-			apiError(w, http.StatusUnauthorized, fmt.Errorf("invalid credentials"))
+		if err != nil || !users.VerifyPassword(user.PasswordHash, password) {
+			a.loginError(w, r, sessID, "Invalid email or password.")
 			return
 		}
 
 		if !user.IsActive {
-			apiError(w, http.StatusUnauthorized, fmt.Errorf("account is inactive"))
-			return
-		}
-
-		if !users.VerifyPassword(user.PasswordHash, password) {
-			apiError(w, http.StatusUnauthorized, fmt.Errorf("invalid credentials"))
+			a.loginError(w, r, sessID, "This account is inactive. Please contact support.")
 			return
 		}
 
 		code, err := tooling.GetRandomString(128)
 		if err != nil {
-			apiError(w, http.StatusInternalServerError, fmt.Errorf("error generating code: %s", err))
+			log.Printf("error generating code: %s", err)
+			a.loginError(w, r, sessID, "Something went wrong. Please try again.")
 			return
 		}
 
@@ -75,16 +74,23 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 			Email:             user.Email,
 			Picture:           user.Picture,
 		}
+		if roles, err := a.Users.GetOrgRoles(user.ID); err != nil {
+			log.Printf("error loading roles for %s: %s", user.ID, err)
+		} else {
+			payload.User.Roles = roles
+		}
 		a.CodePool[code] = payload
 
 		if r.PostForm.Get("remember") == "on" {
 			refreshToken, err := tooling.GetRandomString(64)
 			if err != nil {
-				apiError(w, http.StatusInternalServerError, fmt.Errorf("error generating refresh token: %s", err))
+				log.Printf("error generating refresh token: %s", err)
+				a.loginError(w, r, sessID, "Something went wrong. Please try again.")
 				return
 			}
 			if err := a.Users.CreateRefreshToken(refreshToken, payload.ClientID, user.ID, payload.Scope, time.Now().Add(30*24*time.Hour)); err != nil {
-				apiError(w, http.StatusInternalServerError, fmt.Errorf("error storing refresh token: %s", err))
+				log.Printf("error storing refresh token: %s", err)
+				a.loginError(w, r, sessID, "Something went wrong. Please try again.")
 				return
 			}
 			http.SetCookie(w, &http.Cookie{
@@ -104,69 +110,94 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessID := r.URL.Query().Get("sessionID")
-	if sessID == "" {
-		apiError(w, http.StatusBadRequest, fmt.Errorf("missing sessionID"))
-		return
+
+	errMsg := ""
+	if kind, msg := popFlash(w, r); kind == "error" {
+		errMsg = msg
+	} else if sessID == "" {
+		errMsg = "Missing sign-in session. Please start the sign-in from the application."
 	}
 
-	tmpl, err := parseTemplate("login.html")
-	if err != nil {
-		apiError(w, http.StatusInternalServerError, fmt.Errorf("template error: %v", err))
-		return
-	}
+	a.renderLogin(w, r, sessID, errMsg)
+}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.ExecuteTemplate(w, "layout", map[string]string{
+// loginError implements post/redirect/get: the message is stored in a
+// one-shot flash cookie and the browser is bounced to a GET of the login
+// page, so refreshing cannot resubmit credentials.
+func (a *api) loginError(w http.ResponseWriter, r *http.Request, sessID, msg string) {
+	setFlash(w, "error", msg)
+	location := "/login"
+	if sessID != "" {
+		location += "?sessionID=" + url.QueryEscape(sessID)
+	}
+	http.Redirect(w, r, location, http.StatusSeeOther)
+}
+
+func (a *api) renderLogin(w http.ResponseWriter, r *http.Request, sessID, errMsg string) {
+	renderTemplate(w, "login.html", r, map[string]interface{}{
 		"SessionID": sessID,
-		"CSRFToken": CSRFToken(r),
+		"Error":     errMsg,
 	})
 }
 
+const resetLinkSentMsg = "If an account exists with that email, you will receive a password reset link."
+
 func (a *api) forgotPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		err := r.ParseForm()
-		if err != nil {
-			apiError(w, http.StatusBadRequest, fmt.Errorf("parse form error: %s", err))
+		if err := r.ParseForm(); err != nil {
+			a.renderForgotPassword(w, r, "", "Something went wrong. Please try again.")
 			return
 		}
 
 		email := r.PostForm.Get("email")
 		user, err := a.Users.GetByEmail(email)
 		if err != nil {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("If an account exists with that email, you will receive a password reset link."))
+			a.forgotPasswordResponse(w, r, resetLinkSentMsg, "")
 			return
 		}
 
 		token, err := tooling.GetRandomString(64)
 		if err != nil {
-			apiError(w, http.StatusInternalServerError, fmt.Errorf("error generating token: %s", err))
+			log.Printf("error generating reset token: %s", err)
+			a.forgotPasswordResponse(w, r, "", "Something went wrong. Please try again.")
 			return
 		}
 
 		if err := a.Users.CreatePasswordReset(user.ID, token, time.Now().Add(1*time.Hour)); err != nil {
-			apiError(w, http.StatusInternalServerError, fmt.Errorf("error creating reset token: %s", err))
+			log.Printf("error storing reset token: %s", err)
+			a.forgotPasswordResponse(w, r, "", "Something went wrong. Please try again.")
 			return
 		}
 
 		log.Printf("PASSWORD RESET for %s: %s/reset-password?token=%s", user.Email, a.Config.Url, token)
 
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		a.forgotPasswordResponse(w, r, resetLinkSentMsg, "")
+		return
+	}
+
+	a.renderForgotPassword(w, r, "", "")
+}
+
+// forgotPasswordResponse answers the fetch() call from the page with plain
+// text, or re-renders the full page when the form was submitted without JS.
+func (a *api) forgotPasswordResponse(w http.ResponseWriter, r *http.Request, successMsg, errMsg string) {
+	if strings.Contains(r.Header.Get("Accept"), "text/html") {
+		a.renderForgotPassword(w, r, successMsg, errMsg)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if errMsg != "" {
+		w.WriteHeader(http.StatusInternalServerError)
+	} else {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("If an account exists with that email, you will receive a password reset link."))
-		return
 	}
+	w.Write([]byte(map[bool]string{true: successMsg, false: errMsg}[errMsg == ""]))
+}
 
-	tmpl, err := parseTemplate("forgot-password.html")
-	if err != nil {
-		apiError(w, http.StatusInternalServerError, fmt.Errorf("template error: %v", err))
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.ExecuteTemplate(w, "layout", map[string]string{
-		"CSRFToken": CSRFToken(r),
+func (a *api) renderForgotPassword(w http.ResponseWriter, r *http.Request, successMsg, errMsg string) {
+	renderTemplate(w, "forgot-password.html", r, map[string]interface{}{
+		"Success": successMsg,
+		"Error":   errMsg,
 	})
 }
 
@@ -174,14 +205,15 @@ func (a *api) resetPassword(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" && r.Method == http.MethodPost {
 		if err := r.ParseForm(); err != nil {
-			apiError(w, http.StatusBadRequest, fmt.Errorf("parse form error: %s", err))
+			log.Printf("parse form error: %s", err)
+			a.resetPasswordError(w, r, token, "Something went wrong. Please try again.")
 			return
 		}
 		token = r.PostForm.Get("token")
 	}
 
 	if token == "" {
-		apiError(w, http.StatusBadRequest, fmt.Errorf("missing token"))
+		a.resetPasswordError(w, r, token, "Invalid or expired reset link. Please request a new one.")
 		return
 	}
 
@@ -189,39 +221,36 @@ func (a *api) resetPassword(w http.ResponseWriter, r *http.Request) {
 		password := r.PostForm.Get("password")
 		confirm := r.PostForm.Get("confirm")
 
-		data := map[string]interface{}{
-			"Token":     token,
-			"Error":     "",
-			"CSRFToken": CSRFToken(r),
+		fail := func(msg string) {
+			a.resetPasswordError(w, r, token, msg)
 		}
 
 		if password == "" || len(password) < 8 {
-			data["Error"] = "Password must be at least 8 characters"
-			renderTemplate(w, "reset-password.html", r, data)
+			fail("Password must be at least 8 characters")
 			return
 		}
 
 		if password != confirm {
-			data["Error"] = "Passwords do not match"
-			renderTemplate(w, "reset-password.html", r, data)
+			fail("Passwords do not match")
 			return
 		}
 
 		userID, err := a.Users.GetPasswordReset(token)
 		if err != nil {
-			data["Error"] = "Invalid or expired reset link"
-			renderTemplate(w, "reset-password.html", r, data)
+			fail("Invalid or expired reset link. Please request a new one.")
 			return
 		}
 
 		hash, err := users.HashPassword(password)
 		if err != nil {
-			apiError(w, http.StatusInternalServerError, fmt.Errorf("error hashing password: %s", err))
+			log.Printf("error hashing password: %s", err)
+			fail("Something went wrong. Please try again.")
 			return
 		}
 
 		if err := a.Users.UpdatePasswordHash(userID, hash); err != nil {
-			apiError(w, http.StatusInternalServerError, fmt.Errorf("error updating password: %s", err))
+			log.Printf("error updating password: %s", err)
+			fail("Something went wrong. Please try again.")
 			return
 		}
 
@@ -229,15 +258,26 @@ func (a *api) resetPassword(w http.ResponseWriter, r *http.Request) {
 			log.Printf("warning: failed to mark reset token used: %v", err)
 		}
 
-		http.Redirect(w, r, "/login?reset=success", http.StatusFound)
+		http.Redirect(w, r, "/login?reset=success", http.StatusSeeOther)
 		return
 	}
 
+	errMsg := ""
+	if kind, msg := popFlash(w, r); kind == "error" {
+		errMsg = msg
+	} else if _, err := a.Users.GetPasswordReset(token); err != nil {
+		errMsg = "Invalid or expired reset link. Please request a new one."
+	}
 	renderTemplate(w, "reset-password.html", r, map[string]interface{}{
 		"Token":     token,
-		"Error":     "",
+		"Error":     errMsg,
 		"CSRFToken": CSRFToken(r),
 	})
+}
+
+func (a *api) resetPasswordError(w http.ResponseWriter, r *http.Request, token, msg string) {
+	setFlash(w, "error", msg)
+	http.Redirect(w, r, "/reset-password?token="+url.QueryEscape(token), http.StatusSeeOther)
 }
 
 func renderTemplate(w http.ResponseWriter, name string, r *http.Request, data interface{}) {

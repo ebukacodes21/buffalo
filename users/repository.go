@@ -26,8 +26,29 @@ type User struct {
 	Picture           string
 	PreferredUsername string
 	IsActive          bool
+	IsPlatformAdmin   bool
+	Roles             []string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+const userColumns = `id, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, is_platform_admin, created_at, updated_at`
+
+func scanUser(row interface{ Scan(...any) error }) (*User, error) {
+	user := &User{}
+	err := row.Scan(
+		&user.ID, &user.Email, &user.EmailVerified, &user.PasswordHash,
+		&user.Name, &user.GivenName, &user.FamilyName, &user.Picture,
+		&user.PreferredUsername, &user.IsActive, &user.IsPlatformAdmin,
+		&user.CreatedAt, &user.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 type Repository struct {
@@ -38,53 +59,51 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) GetByEmail(email string) (*User, error) {
-	user := &User{}
-	err := r.db.QueryRow(`
-		SELECT id, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at
-		FROM users
-		WHERE email = $1
-	`, email).Scan(
-		&user.ID, &user.Email, &user.EmailVerified, &user.PasswordHash,
-		&user.Name, &user.GivenName, &user.FamilyName, &user.Picture,
-		&user.PreferredUsername, &user.IsActive, &user.CreatedAt, &user.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, ErrUserNotFound
-	}
+func (r *Repository) GetOrgRoles(userID string) ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT role
+		FROM org_members
+		WHERE user_id = $1
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
-	return user, nil
+	defer rows.Close()
+
+	roles := []string{}
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return nil, err
+		}
+		roles = append(roles, role)
+	}
+	return roles, rows.Err()
+}
+
+func (r *Repository) GetByEmail(email string) (*User, error) {
+	return scanUser(r.db.QueryRow(`
+		SELECT `+userColumns+`
+		FROM users
+		WHERE email = $1
+	`, email))
 }
 
 func (r *Repository) GetByID(id string) (*User, error) {
-	user := &User{}
-	err := r.db.QueryRow(`
-		SELECT id, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at
+	return scanUser(r.db.QueryRow(`
+		SELECT `+userColumns+`
 		FROM users
 		WHERE id = $1
-	`, id).Scan(
-		&user.ID, &user.Email, &user.EmailVerified, &user.PasswordHash,
-		&user.Name, &user.GivenName, &user.FamilyName, &user.Picture,
-		&user.PreferredUsername, &user.IsActive, &user.CreatedAt, &user.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, ErrUserNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return user, nil
+	`, id))
 }
 
 func (r *Repository) Create(user *User) error {
 	_, err := r.db.Exec(`
-		INSERT INTO users (id, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO users (id, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, is_platform_admin)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`, user.ID, user.Email, user.EmailVerified, user.PasswordHash,
 		user.Name, user.GivenName, user.FamilyName, user.Picture,
-		user.PreferredUsername, user.IsActive)
+		user.PreferredUsername, user.IsActive, user.IsPlatformAdmin)
 	return err
 }
 
@@ -183,4 +202,54 @@ func (r *Repository) UpdatePasswordHash(userID, hash string) error {
 		UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1
 	`, userID, hash)
 	return err
+}
+
+// Admin console queries
+
+type UserRow struct {
+	ID              string    `json:"id"`
+	Email           string    `json:"email"`
+	Name            string    `json:"name"`
+	EmailVerified   bool      `json:"email_verified"`
+	IsActive        bool      `json:"is_active"`
+	IsPlatformAdmin bool      `json:"is_platform_admin"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+func (r *Repository) List(search string, limit int) ([]UserRow, error) {
+	pattern := "%" + search + "%"
+	rows, err := r.db.Query(`
+		SELECT id, email, name, email_verified, is_active, is_platform_admin, created_at
+		FROM users
+		WHERE ($1 = '' OR email ILIKE $2 OR name ILIKE $2)
+		ORDER BY created_at DESC
+		LIMIT $3
+	`, search, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []UserRow{}
+	for rows.Next() {
+		var u UserRow
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.EmailVerified, &u.IsActive, &u.IsPlatformAdmin, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) SetActive(userID string, active bool) error {
+	_, err := r.db.Exec(`
+		UPDATE users SET is_active = $2, updated_at = NOW() WHERE id = $1
+	`, userID, active)
+	return err
+}
+
+func (r *Repository) CountAll() (int, error) {
+	var count int
+	err := r.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
+	return count, err
 }

@@ -1,8 +1,9 @@
 package api
 
 import (
-	"buffalo/users"
 	"time"
+
+	"github.com/ebukacodes21/buffalo/users"
 )
 
 type Config struct {
@@ -26,4 +27,5 @@ type Payload struct {
 	Scope        string
 	CodeIssuedAt time.Time
 	User         users.User
+	AppConfig    AppConfig
 }

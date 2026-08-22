@@ -1,16 +1,19 @@
 package api
 
 import (
-	"buffalo/users"
 	"database/sql"
 	"fmt"
 	"net/http"
+
+	"github.com/ebukacodes21/buffalo/admin"
+	"github.com/ebukacodes21/buffalo/users"
 )
 
 type api struct {
 	PrivateKey []byte
 	Config     Config
 	Users      *users.Repository
+	Admin      *admin.Repository
 	// pool to store all session payloads on the server
 	SessionPool map[string]Payload
 	CodePool    map[string]Payload
@@ -21,6 +24,7 @@ func newApi(privateKey []byte, config Config, db *sql.DB) *api {
 		PrivateKey:  privateKey,
 		Config:      config,
 		Users:       users.NewRepository(db),
+		Admin:       admin.NewRepository(db),
 		SessionPool: make(map[string]Payload),
 		CodePool:    make(map[string]Payload),
 	}
@@ -32,13 +36,31 @@ func Start(httpServer *http.Server, privateKey []byte, config Config, db *sql.DB
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", a.index)
 	mux.HandleFunc("/authorization", a.authorization)
-	// mux.HandleFunc("/token", a.token)
+	mux.HandleFunc("/token", a.token)
 	mux.HandleFunc("/login", a.login)
 	mux.HandleFunc("/forgot-password", a.forgotPassword)
 	mux.HandleFunc("/reset-password", a.resetPassword)
-	// mux.HandleFunc("/jwkb.json", a.jwks)
+	mux.HandleFunc("/jwks", a.jwks)
 	mux.HandleFunc("/.well-known/openid-configuration", a.discovery)
-	// mux.HandleFunc("/userinfo", a.userinfo)
+	mux.HandleFunc("/userinfo", a.userinfo)
+
+	// Admin JSON API (consumed by the Arkad console application)
+	mux.HandleFunc("GET /api/admin/stats", a.adminAPIGuard(a.apiStats))
+	mux.HandleFunc("GET /api/admin/businesses", a.adminAPIGuard(a.apiBusinessList))
+	mux.HandleFunc("POST /api/admin/businesses", a.adminAPIGuard(a.apiBusinessOnboard))
+	mux.HandleFunc("GET /api/admin/businesses/{id}", a.adminAPIGuard(a.apiBusinessDetail))
+	mux.HandleFunc("POST /api/admin/businesses/{id}/status", a.adminAPIGuard(a.apiBusinessStatus))
+	mux.HandleFunc("POST /api/admin/businesses/{id}/members/add", a.adminAPIGuard(a.apiMemberAdd))
+	mux.HandleFunc("POST /api/admin/businesses/{id}/members/{memberID}/role", a.adminAPIGuard(a.apiMemberRole))
+	mux.HandleFunc("POST /api/admin/businesses/{id}/members/{memberID}/remove", a.adminAPIGuard(a.apiMemberRemove))
+	mux.HandleFunc("GET /api/admin/apps", a.adminAPIGuard(a.apiAppList))
+	mux.HandleFunc("POST /api/admin/apps", a.adminAPIGuard(a.apiAppCreate))
+	mux.HandleFunc("GET /api/admin/apps/{id}", a.adminAPIGuard(a.apiAppDetail))
+	mux.HandleFunc("POST /api/admin/apps/{id}/update", a.adminAPIGuard(a.apiAppUpdate))
+	mux.HandleFunc("POST /api/admin/apps/{id}/rotate", a.adminAPIGuard(a.apiAppRotate))
+	mux.HandleFunc("GET /api/admin/users", a.adminAPIGuard(a.apiUserList))
+	mux.HandleFunc("POST /api/admin/users/{id}/active", a.adminAPIGuard(a.apiUserSetActive))
+	mux.HandleFunc("GET /api/admin/audit", a.adminAPIGuard(a.apiAuditList))
 
 	httpServer.Handler = CSRFMiddleware(privateKey, mux)
 

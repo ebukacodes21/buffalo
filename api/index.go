@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 func (a *api) index(w http.ResponseWriter, r *http.Request) {
@@ -10,6 +11,36 @@ func (a *api) index(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
+	returnURL, appName := "", ""
+	if c, err := r.Cookie("last_client"); err == nil && c.Value != "" {
+		for _, app := range a.Config.Apps {
+			if app.ClientID != c.Value || len(app.RedirectURIs) == 0 {
+				continue
+			}
+			if u, err := url.Parse(app.RedirectURIs[0]); err == nil && u.Host != "" {
+				returnURL = u.Scheme + "://" + u.Host
+				appName = u.Host
+			}
+			break
+		}
+
+		// Fall back to clients provisioned through the admin console.
+		if returnURL == "" {
+			if client, err := a.Admin.GetActiveClientByClientID(c.Value); err == nil && len(client.RedirectURIs) > 0 {
+				if u, err := url.Parse(client.RedirectURIs[0]); err == nil && u.Host != "" {
+					returnURL = u.Scheme + "://" + u.Host
+					appName = u.Host
+				}
+			}
+		}
+	}
+
+	continueBtn := ""
+	if returnURL != "" {
+		continueBtn = fmt.Sprintf(`<a class="btn btn-primary-ext" href="%s">Continue to %s</a>`, returnURL, appName)
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(`<!DOCTYPE html>
 <html lang="en">
@@ -30,14 +61,37 @@ func (a *api) index(w http.ResponseWriter, r *http.Request) {
         }
         .msg { text-align: center; max-width: 400px; }
         .msg h1 { font-size: 24px; font-weight: 600; margin-bottom: 12px; }
-        .msg p { font-size: 14px; color: #fff; line-height: 1.6; }
+        .msg p { font-size: 14px; color: rgba(255,255,255,0.7); line-height: 1.6; margin-bottom: 28px; }
+        .btn {
+            display: inline-block;
+            padding: 11px 22px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: 'Inter', sans-serif;
+            text-decoration: none;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s;
+            margin: 0 6px;
+        }
+        .btn-primary-ext { background: #108cf8; color: #fff; border: none; }
+        .btn-primary-ext:hover { background: #1267cf; }
+        .btn-secondary { background: transparent; color: rgba(255,255,255,0.8); border: 1px solid rgba(255,255,255,0.25); }
+        .btn-secondary:hover { border-color: rgba(255,255,255,0.5); color: #fff; }
     </style>
 </head>
 <body>
     <div class="msg">
         <h1>Buffalo Identity Provider</h1>
         <p>Please start the sign-in flow from the application.</p>
+        ` + continueBtn + `
+        <button type="button" class="btn btn-secondary" id="backBtn" onclick="history.back()">Go back</button>
     </div>
+    <script>
+        if (history.length <= 1) {
+            document.getElementById('backBtn').style.display = 'none';
+        }
+    </script>
 </body>
 </html>`))
 	fmt.Printf("info: unauthenticated access to %s from %s\n", r.URL.Path, r.RemoteAddr)

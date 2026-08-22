@@ -1,9 +1,11 @@
 package api
 
 import (
-	"buffalo/tooling"
 	"fmt"
+	"log"
 	"net/http"
+
+	"github.com/ebukacodes21/buffalo/tooling"
 )
 
 func (a *api) authorization(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +49,22 @@ func (a *api) authorization(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fall back to clients provisioned through the admin console.
+	if appConfig.ClientID == "" {
+		client, err := a.Admin.GetActiveClientByClientID(clientID)
+		if err != nil {
+			log.Printf("dynamic client lookup %q failed: %v", clientID, err)
+		}
+		if err == nil {
+			appConfig = AppConfig{
+				ClientID:     client.ClientID,
+				ClientSecret: client.ClientSecret,
+				Issuer:       a.Config.Url,
+				RedirectURIs: client.RedirectURIs,
+			}
+		}
+	}
+
 	if appConfig.ClientID == "" {
 		apiError(w, http.StatusNotFound, fmt.Errorf("client_id not found"))
 		return
@@ -76,7 +94,17 @@ func (a *api) authorization(w http.ResponseWriter, r *http.Request) {
 		ResponseType: responseType,
 		Scope:        scope,
 		State:        state,
+		AppConfig:    appConfig,
 	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "last_client",
+		Value:    clientID,
+		Path:     "/",
+		MaxAge:   30 * 24 * 60 * 60,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 
 	w.Header().Add("location", fmt.Sprintf("/login?sessionID=%s", sessID))
 	w.WriteHeader(http.StatusFound)

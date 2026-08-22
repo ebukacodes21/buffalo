@@ -186,7 +186,12 @@
         .success-message {
             background: #f7fdf9; border: 1px solid #d1fae5; color: #065f46;
             padding: 12px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 24px;
-            display: none; font-weight: 400;
+            font-weight: 400;
+        }
+        .success-message:empty { display: none; }
+        .inline-note {
+            font-size: 13px; color: var(--gray-2); line-height: 1.6;
+            text-align: center; padding: 12px 0;
         }
 
         /* ── Buttons & links ── */
@@ -250,7 +255,7 @@
             {{block "brandExtra" .}}<div class="brand-divider"></div>{{end}}
         </div>
         <div class="brand-footer">
-            <p>Powered by Arkad Business Solutions</p>
+            <p>Powered by Arkad Business</p>
         </div>
     </div>
 

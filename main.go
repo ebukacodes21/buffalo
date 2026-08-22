@@ -1,14 +1,15 @@
 package main
 
 import (
-	"buffalo/api"
-	"buffalo/db"
-	"buffalo/tooling"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/ebukacodes21/buffalo/api"
+	"github.com/ebukacodes21/buffalo/db"
+	"github.com/ebukacodes21/buffalo/tooling"
 )
 
 var configFile = "config.yaml"

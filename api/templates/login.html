@@ -7,7 +7,9 @@
 </div>
 
 <div id="resetSuccess" class="success-message"></div>
+{{if .Error}}<div class="alert-error">{{.Error}}</div>{{end}}
 
+{{if .SessionID}}
 <form id="loginForm" method="POST" action="/login" onsubmit="return handleLogin(event)">
     <input type="hidden" name="sessionID" id="sessionId" value="{{.SessionID}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -40,6 +42,9 @@
 
     <button type="submit" class="btn-primary">Sign in</button>
 </form>
+{{else if not .Error}}
+<p class="inline-note">Your sign-in session has expired or is missing.<br>Please restart the sign-in from the application.</p>
+{{end}}
 {{end}}
 
 {{define "scripts"}}

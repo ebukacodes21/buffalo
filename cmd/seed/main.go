@@ -1,12 +1,13 @@
 package main
 
 import (
-	"buffalo/db"
-	"buffalo/users"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+
+	"github.com/ebukacodes21/buffalo/db"
+	"github.com/ebukacodes21/buffalo/users"
 
 	"github.com/google/uuid"
 )
@@ -17,6 +18,7 @@ func main() {
 	name := flag.String("name", "", "Full name (required)")
 	givenName := flag.String("given-name", "", "Given name")
 	familyName := flag.String("family-name", "", "Family name")
+	platformAdmin := flag.Bool("platform-admin", false, "Grant platform admin (console) access")
 	flag.Parse()
 
 	if *email == "" || *password == "" || *name == "" {
@@ -52,6 +54,7 @@ func main() {
 		FamilyName:        *familyName,
 		PreferredUsername: *email,
 		IsActive:          true,
+		IsPlatformAdmin:   *platformAdmin,
 	}
 
 	if err := repo.Create(user); err != nil {

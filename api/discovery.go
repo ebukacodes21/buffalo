@@ -1,10 +1,11 @@
 package api
 
 import (
-	"buffalo/oidc"
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/ebukacodes21/buffalo/oidc"
 )
 
 func (a *api) discovery(w http.ResponseWriter, _ *http.Request) {
