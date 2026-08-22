@@ -6,17 +6,20 @@ import (
 	"github.com/ebukacodes21/buffalo/users"
 )
 
+// Config holds the settings buffalo cannot derive at runtime. OAuth clients
+// are no longer configured here — they live in the database and are managed
+// through the Arkad Business Console.
 type Config struct {
-	Apps      map[string]AppConfig `yaml:"apps"`
-	Url       string               `yaml:"url"`
-	LoadError error
+	Url string // public issuer URL, e.g. https://id.arkad.africa
 }
 
+// AppConfig is the resolved view of an oauth_clients row used inside the
+// authorize/token flows.
 type AppConfig struct {
-	ClientID     string   `yaml:"clientID"`
-	ClientSecret string   `yaml:"clientSecret"`
-	Issuer       string   `yaml:"issuer"`
-	RedirectURIs []string `yaml:"redirectURIs"`
+	ClientID     string
+	ClientSecret string
+	Issuer       string
+	RedirectURIs []string
 }
 
 type Payload struct {

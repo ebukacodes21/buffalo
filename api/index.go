@@ -14,24 +14,11 @@ func (a *api) index(w http.ResponseWriter, r *http.Request) {
 
 	returnURL, appName := "", ""
 	if c, err := r.Cookie("last_client"); err == nil && c.Value != "" {
-		for _, app := range a.Config.Apps {
-			if app.ClientID != c.Value || len(app.RedirectURIs) == 0 {
-				continue
-			}
-			if u, err := url.Parse(app.RedirectURIs[0]); err == nil && u.Host != "" {
+		// OAuth clients live in the database (managed via the Arkad console).
+		if client, err := a.Admin.GetActiveClientByClientID(c.Value); err == nil && len(client.RedirectURIs) > 0 {
+			if u, err := url.Parse(client.RedirectURIs[0]); err == nil && u.Host != "" {
 				returnURL = u.Scheme + "://" + u.Host
 				appName = u.Host
-			}
-			break
-		}
-
-		// Fall back to clients provisioned through the admin console.
-		if returnURL == "" {
-			if client, err := a.Admin.GetActiveClientByClientID(c.Value); err == nil && len(client.RedirectURIs) > 0 {
-				if u, err := url.Parse(client.RedirectURIs[0]); err == nil && u.Host != "" {
-					returnURL = u.Scheme + "://" + u.Host
-					appName = u.Host
-				}
 			}
 		}
 	}

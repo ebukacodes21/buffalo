@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: buffalo
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: BUFFALO_URL
+        sync: false

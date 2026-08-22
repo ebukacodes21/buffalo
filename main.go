@@ -7,28 +7,32 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/ebukacodes21/buffalo/admin"
 	"github.com/ebukacodes21/buffalo/api"
 	"github.com/ebukacodes21/buffalo/db"
 	"github.com/ebukacodes21/buffalo/tooling"
+
+	"github.com/joho/godotenv"
 )
 
-var configFile = "config.yaml"
+// issuerURL resolves the public URL of this buffalo instance. OAuth clients
+// are seeded into the database — settings.yaml is gone.
+func issuerURL() string {
+	if v := os.Getenv("BUFFALO_URL"); v != "" {
+		return v
+	}
+	return "http://localhost:8089"
+}
 
 func main() {
+	// .env is a local-dev convenience; platforms like Render inject real env
+	// vars and this becomes a no-op.
+	_ = godotenv.Load()
+
 	var (
 		privateKey []byte
 		err        error
 	)
-
-	if _, err = os.Stat(configFile); errors.Is(err, os.ErrNotExist) {
-		fmt.Printf("error %s does not exist", configFile)
-		os.Exit(1)
-	}
-
-	config, err := os.ReadFile(configFile)
-	if err != nil {
-		log.Fatalf("failed to load %s, err: %v", configFile, err)
-	}
 
 	if _, err = os.Stat("enckey.pem"); errors.Is(err, os.ErrNotExist) {
 		if privateKey, _, err = tooling.GenerateKeys(); err != nil {
@@ -48,7 +52,7 @@ func main() {
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/buffalo?sslmode=disable"
+		log.Fatalf("missing database key, err: %v", err)
 	}
 
 	if err := db.RunMigrations(dbURL); err != nil {
@@ -61,5 +65,9 @@ func main() {
 	}
 	defer database.Close()
 
-	fmt.Printf("api stopped: %s", api.Start(&http.Server{Addr: ":8089"}, privateKey, api.ReadConfig(config), database))
+	if err := admin.SeedDefaultClients(database); err != nil {
+		log.Fatalf("failed to seed default clients: %v", err)
+	}
+
+	fmt.Printf("api stopped: %s", api.Start(&http.Server{Addr: ":8089"}, privateKey, api.Config{Url: issuerURL()}, database))
 }

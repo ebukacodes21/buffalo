@@ -124,14 +124,11 @@ func (a *api) apiBusinessList(w http.ResponseWriter, r *http.Request, actor *use
 }
 
 type onboardRequest struct {
-	Name          string   `json:"name"`
-	Slug          string   `json:"slug"`
-	OwnerName     string   `json:"owner_name"`
-	OwnerEmail    string   `json:"owner_email"`
-	OwnerPassword string   `json:"owner_password"`
-	CreateApp     bool     `json:"create_app"`
-	AppName       string   `json:"app_name"`
-	RedirectURIs  []string `json:"redirect_uris"`
+	Name          string `json:"name"`
+	Slug          string `json:"slug"`
+	OwnerName     string `json:"owner_name"`
+	OwnerEmail    string `json:"owner_email"`
+	OwnerPassword string `json:"owner_password"`
 }
 
 func (a *api) apiBusinessOnboard(w http.ResponseWriter, r *http.Request, actor *users.User) {
@@ -176,9 +173,6 @@ func (a *api) apiBusinessOnboard(w http.ResponseWriter, r *http.Request, actor *
 		OwnerName:     req.OwnerName,
 		OwnerEmail:    req.OwnerEmail,
 		OwnerPassword: password,
-		CreateApp:     req.CreateApp,
-		AppName:       firstNonEmpty(req.AppName, req.Name+" App"),
-		RedirectURIs:  req.RedirectURIs,
 	})
 	if err == admin.ErrSlugTaken {
 		writeJSONError(w, http.StatusConflict, fmt.Sprintf("slug %q is already taken", slug))
@@ -192,13 +186,8 @@ func (a *api) apiBusinessOnboard(w http.ResponseWriter, r *http.Request, actor *
 	a.auditAPI(r, actor, "org.created", result.Org.ID, map[string]interface{}{
 		"name": result.Org.Name, "slug": result.Org.Slug, "owner": req.OwnerEmail,
 	})
-	if result.Client != nil {
-		a.auditAPI(r, actor, "app.created", result.Org.ID, map[string]interface{}{
-			"name": result.Client.Name, "client_id": result.Client.ClientID,
-		})
-	}
 
-	resp := map[string]interface{}{
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"organization":     result.Org,
 		"owner_membership": result.Member,
 		"owner_credentials": map[string]interface{}{
@@ -206,15 +195,7 @@ func (a *api) apiBusinessOnboard(w http.ResponseWriter, r *http.Request, actor *
 			"password":  password,
 			"generated": generated,
 		},
-	}
-	if result.Client != nil {
-		secret := result.Client.ClientSecret
-		result.Client.ClientSecret = ""
-		resp["application"] = result.Client
-		resp["client_secret_once"] = secret
-	}
-
-	writeJSON(w, http.StatusCreated, resp)
+	})
 }
 
 func (a *api) loadOrgOr404(w http.ResponseWriter, r *http.Request) (*admin.Organization, bool) {
@@ -229,7 +210,6 @@ func (a *api) loadOrgOr404(w http.ResponseWriter, r *http.Request) (*admin.Organ
 type businessDetail struct {
 	Organization *admin.Organization `json:"organization"`
 	Members      []admin.Member      `json:"members"`
-	Applications []admin.ClientRow   `json:"applications"`
 	Audit        []admin.AuditEvent  `json:"audit"`
 }
 
@@ -239,14 +219,10 @@ func (a *api) apiBusinessDetail(w http.ResponseWriter, r *http.Request, actor *u
 		return
 	}
 	members, _ := a.Admin.ListMembers(org.ID)
-	clients, _ := a.Admin.ListClients(org.ID, "", 50)
 	events, _ := a.Admin.ListAuditEvents(org.ID, 20)
 
-	for i := range clients {
-		clients[i].ClientSecret = ""
-	}
 	writeJSON(w, http.StatusOK, businessDetail{
-		Organization: org, Members: members, Applications: clients, Audit: events,
+		Organization: org, Members: members, Audit: events,
 	})
 }
 
@@ -432,8 +408,7 @@ func (a *api) apiMemberRemove(w http.ResponseWriter, r *http.Request, actor *use
 // ── Applications ──
 
 func (a *api) apiAppList(w http.ResponseWriter, r *http.Request, actor *users.User) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	clients, err := a.Admin.ListClients(strings.TrimSpace(r.URL.Query().Get("org_id")), q, 200)
+	clients, err := a.Admin.ListClients(strings.TrimSpace(r.URL.Query().Get("q")), 200)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -445,11 +420,12 @@ func (a *api) apiAppList(w http.ResponseWriter, r *http.Request, actor *users.Us
 }
 
 type createAppRequest struct {
-	OrgID        string   `json:"org_id"`
 	Name         string   `json:"name"`
 	RedirectURIs []string `json:"redirect_uris"`
 }
 
+// apiAppCreate registers a platform product: an OAuth client owned by the
+// platform rather than by any single business.
 func (a *api) apiAppCreate(w http.ResponseWriter, r *http.Request, actor *users.User) {
 	var req createAppRequest
 	if err := readJSON(r, &req); err != nil {
@@ -461,12 +437,6 @@ func (a *api) apiAppCreate(w http.ResponseWriter, r *http.Request, actor *users.
 		writeJSONError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if req.OrgID != "" {
-		if _, err := a.Admin.GetOrg(req.OrgID); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "unknown organization")
-			return
-		}
-	}
 	clientID, secret, err := admin.NewClientCredentials()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
@@ -476,14 +446,13 @@ func (a *api) apiAppCreate(w http.ResponseWriter, r *http.Request, actor *users.
 		ClientID:     clientID,
 		ClientSecret: secret,
 		Name:         req.Name,
-		OrgID:        req.OrgID,
 		RedirectURIs: firstNonEmptySlice(req.RedirectURIs, []string{}),
 	}
 	if err := a.Admin.CreateClient(client); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.auditAPI(r, actor, "app.created", client.OrgID, map[string]interface{}{
+	a.auditAPI(r, actor, "app.created", "", map[string]interface{}{
 		"name": client.Name, "client_id": client.ClientID,
 	})
 
@@ -537,7 +506,7 @@ func (a *api) apiAppUpdate(w http.ResponseWriter, r *http.Request, actor *users.
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.auditAPI(r, actor, "app.updated", client.OrgID, map[string]interface{}{
+	a.auditAPI(r, actor, "app.updated", "", map[string]interface{}{
 		"client_id": client.ClientID, "redirect_uris": req.RedirectURIs, "active": req.IsActive,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
@@ -557,7 +526,7 @@ func (a *api) apiAppRotate(w http.ResponseWriter, r *http.Request, actor *users.
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.auditAPI(r, actor, "app.secret_rotated", client.OrgID, map[string]interface{}{
+	a.auditAPI(r, actor, "app.secret_rotated", "", map[string]interface{}{
 		"client_id": client.ClientID,
 	})
 	writeJSON(w, http.StatusOK, map[string]interface{}{

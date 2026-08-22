@@ -48,8 +48,6 @@ type Client struct {
 	ClientSecret string    `json:"client_secret,omitempty"`
 	SecretOnce   string    `json:"secret_once,omitempty"`
 	Name         string    `json:"name"`
-	OrgID        string    `json:"org_id,omitempty"`
-	OrgName      string    `json:"org_name,omitempty"`
 	RedirectURIs []string  `json:"redirect_uris"`
 	IsActive     bool      `json:"is_active"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -73,20 +71,16 @@ type Stats struct {
 }
 
 type OnboardInput struct {
-	OrgName       string   `json:"name"`
-	Slug          string   `json:"slug"`
-	OwnerName     string   `json:"owner_name"`
-	OwnerEmail    string   `json:"owner_email"`
-	OwnerPassword string   `json:"owner_password"`
-	CreateApp     bool     `json:"create_app"`
-	AppName       string   `json:"app_name"`
-	RedirectURIs  []string `json:"redirect_uris"`
+	OrgName       string `json:"name"`
+	Slug          string `json:"slug"`
+	OwnerName     string `json:"owner_name"`
+	OwnerEmail    string `json:"owner_email"`
+	OwnerPassword string `json:"owner_password"`
 }
 
 type OnboardResult struct {
 	Org    Organization `json:"organization"`
 	Member Member       `json:"owner_membership"`
-	Client *Client      `json:"application,omitempty"`
 }
 
 type Repository struct {
@@ -136,15 +130,13 @@ func (r *Repository) GetOrgBySlug(slug string) (*Organization, error) {
 type OrgRow struct {
 	Organization
 	MemberCount int `json:"member_count"`
-	AppCount    int `json:"app_count"`
 }
 
 func (r *Repository) ListOrgs(search string, limit int) ([]OrgRow, error) {
 	pattern := "%" + search + "%"
 	rows, err := r.db.Query(`
 		SELECT o.id, o.name, o.slug, o.status, o.created_at, o.updated_at,
-		       (SELECT COUNT(*) FROM org_members m WHERE m.org_id = o.id),
-		       (SELECT COUNT(*) FROM oauth_clients c WHERE c.org_id = o.id AND c.is_active)
+		       (SELECT COUNT(*) FROM org_members m WHERE m.org_id = o.id)
 		FROM organizations o
 		WHERE ($1 = '' OR o.name ILIKE $2 OR o.slug ILIKE $2)
 		ORDER BY o.created_at DESC
@@ -159,7 +151,7 @@ func (r *Repository) ListOrgs(search string, limit int) ([]OrgRow, error) {
 	for rows.Next() {
 		var row OrgRow
 		if err := rows.Scan(&row.ID, &row.Name, &row.Slug, &row.Status, &row.CreatedAt, &row.UpdatedAt,
-			&row.MemberCount, &row.AppCount); err != nil {
+			&row.MemberCount); err != nil {
 			return nil, err
 		}
 		out = append(out, row)
@@ -287,7 +279,7 @@ func (r *Repository) RemoveMember(orgID, memberID string) error {
 
 // ── OAuth Clients ──
 
-const clientColumns = `id, client_id, client_secret, name, COALESCE(org_id::text, ''), redirect_uris, is_active, created_at`
+const clientColumns = `id, client_id, client_secret, name, redirect_uris, is_active, created_at`
 
 // textArray converts a Postgres TEXT[] value as delivered by the pgx
 // stdlib driver ([]string or "{a,b}" literal) into a []string.
@@ -330,7 +322,7 @@ func parseTextArrayLiteral(s string) []string {
 func scanClient(row interface{ Scan(...any) error }) (*Client, error) {
 	c := &Client{}
 	var uris any
-	err := row.Scan(&c.ID, &c.ClientID, &c.ClientSecret, &c.Name, &c.OrgID, &uris, &c.IsActive, &c.CreatedAt)
+	err := row.Scan(&c.ID, &c.ClientID, &c.ClientSecret, &c.Name, &uris, &c.IsActive, &c.CreatedAt)
 	c.RedirectURIs = textArray(uris)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -342,15 +334,6 @@ func scanClient(row interface{ Scan(...any) error }) (*Client, error) {
 		c.RedirectURIs = []string{}
 	}
 	return c, nil
-}
-
-func (r *Repository) CreateClientTx(tx *sql.Tx, c *Client) error {
-	return tx.QueryRow(`
-		INSERT INTO oauth_clients (client_id, client_secret, name, org_id, redirect_uris)
-		VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5)
-		RETURNING id, is_active, created_at
-	`, c.ClientID, c.ClientSecret, c.Name, c.OrgID, c.RedirectURIs).
-		Scan(&c.ID, &c.IsActive, &c.CreatedAt)
 }
 
 // GetActiveClientByClientID looks up an enabled OAuth client by its public
@@ -370,17 +353,15 @@ type ClientRow struct {
 	Client
 }
 
-func (r *Repository) ListClients(orgID, search string, limit int) ([]ClientRow, error) {
+func (r *Repository) ListClients(search string, limit int) ([]ClientRow, error) {
 	pattern := "%" + search + "%"
 	rows, err := r.db.Query(`
-		SELECT c.id, c.client_id, c.client_secret, c.name, COALESCE(c.org_id::text, ''), c.redirect_uris, c.is_active, c.created_at,
-		       COALESCE(o.name, '')
-		FROM oauth_clients c LEFT JOIN organizations o ON o.id = c.org_id
-		WHERE ($1 = '' OR c.org_id::text = $1)
-		  AND ($2 = '' OR c.name ILIKE $3 OR c.client_id ILIKE $3)
-		ORDER BY c.created_at DESC
-		LIMIT $4
-	`, orgID, search, pattern, limit)
+		SELECT `+clientColumns+`
+		FROM oauth_clients
+		WHERE ($1 = '' OR name ILIKE $2 OR client_id ILIKE $2)
+		ORDER BY created_at DESC
+		LIMIT $3
+	`, search, pattern, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -390,8 +371,8 @@ func (r *Repository) ListClients(orgID, search string, limit int) ([]ClientRow, 
 	for rows.Next() {
 		var row ClientRow
 		var uris any
-		if err := rows.Scan(&row.ID, &row.ClientID, &row.ClientSecret, &row.Name, &row.OrgID,
-			&uris, &row.IsActive, &row.CreatedAt, &row.OrgName); err != nil {
+		if err := rows.Scan(&row.ID, &row.ClientID, &row.ClientSecret, &row.Name,
+			&uris, &row.IsActive, &row.CreatedAt); err != nil {
 			return nil, err
 		}
 		row.RedirectURIs = textArray(uris)
@@ -415,10 +396,10 @@ func (r *Repository) UpdateClient(id, name string, redirectURIs []string, isActi
 
 func (r *Repository) CreateClient(c *Client) error {
 	return r.db.QueryRow(`
-		INSERT INTO oauth_clients (client_id, client_secret, name, org_id, redirect_uris)
-		VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5)
+		INSERT INTO oauth_clients (client_id, client_secret, name, redirect_uris)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id, is_active, created_at
-	`, c.ClientID, c.ClientSecret, c.Name, c.OrgID, c.RedirectURIs).
+	`, c.ClientID, c.ClientSecret, c.Name, c.RedirectURIs).
 		Scan(&c.ID, &c.IsActive, &c.CreatedAt)
 }
 
@@ -533,19 +514,13 @@ func (r *Repository) Stats() (Stats, error) {
 // ── Onboarding ──
 
 // OnboardBusiness provisions everything a new business needs on buffalo in a
-// single transaction: the organization, its owner account, the owner's
-// membership, and optionally its first OAuth application.
+// single transaction: the organization, its owner account, and the owner's
+// membership. OAuth clients are platform products and are managed
+// independently of businesses.
 func (r *Repository) OnboardBusiness(in OnboardInput) (*OnboardResult, error) {
 	hash, err := users.HashPassword(in.OwnerPassword)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
-	}
-
-	var clientID, clientSecret string
-	if in.CreateApp {
-		if clientID, clientSecret, err = NewClientCredentials(); err != nil {
-			return nil, fmt.Errorf("generate app credentials: %w", err)
-		}
 	}
 
 	tx, err := r.db.Begin()
@@ -596,20 +571,6 @@ func (r *Repository) OnboardBusiness(in OnboardInput) (*OnboardResult, error) {
 	}
 	member.Name, member.Email = owner.Name, owner.Email
 	result.Member = *member
-
-	if in.CreateApp {
-		client := &Client{
-			ClientID:     clientID,
-			ClientSecret: clientSecret,
-			Name:         in.AppName,
-			OrgID:        org.ID,
-			RedirectURIs: in.RedirectURIs,
-		}
-		if err = r.CreateClientTx(tx, client); err != nil {
-			return nil, fmt.Errorf("register app: %w", err)
-		}
-		result.Client = client
-	}
 
 	if err = tx.Commit(); err != nil {
 		return nil, err

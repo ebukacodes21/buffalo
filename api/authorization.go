@@ -37,31 +37,23 @@ func (a *api) authorization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	appConfig := AppConfig{}
 	if scope = r.URL.Query().Get("scope"); scope == "" {
 		apiError(w, http.StatusBadRequest, fmt.Errorf("scope is missing"))
 		return
 	}
 
-	for _, app := range a.Config.Apps {
-		if app.ClientID == clientID {
-			appConfig = app
-		}
+	// OAuth clients live in the database (managed via the Arkad console).
+	appConfig := AppConfig{}
+	client, err := a.Admin.GetActiveClientByClientID(clientID)
+	if err != nil {
+		log.Printf("client lookup %q failed: %v", clientID, err)
 	}
-
-	// Fall back to clients provisioned through the admin console.
-	if appConfig.ClientID == "" {
-		client, err := a.Admin.GetActiveClientByClientID(clientID)
-		if err != nil {
-			log.Printf("dynamic client lookup %q failed: %v", clientID, err)
-		}
-		if err == nil {
-			appConfig = AppConfig{
-				ClientID:     client.ClientID,
-				ClientSecret: client.ClientSecret,
-				Issuer:       a.Config.Url,
-				RedirectURIs: client.RedirectURIs,
-			}
+	if err == nil {
+		appConfig = AppConfig{
+			ClientID:     client.ClientID,
+			ClientSecret: client.ClientSecret,
+			Issuer:       a.Config.Url,
+			RedirectURIs: client.RedirectURIs,
 		}
 	}
 

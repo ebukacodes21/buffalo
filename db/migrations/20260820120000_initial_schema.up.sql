@@ -43,13 +43,12 @@ CREATE TABLE org_members (
 CREATE INDEX idx_org_members_org ON org_members(org_id);
 CREATE INDEX idx_org_members_user ON org_members(user_id);
 
--- OAuth2 Clients
+-- OAuth2 Clients (platform products; first-party clients are seeded)
 CREATE TABLE oauth_clients (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     client_id VARCHAR(100) UNIQUE NOT NULL,
     client_secret VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
-    org_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
     redirect_uris TEXT[] NOT NULL DEFAULT '{}',
     grant_types TEXT[] NOT NULL DEFAULT '{"authorization_code"}',
     response_types TEXT[] NOT NULL DEFAULT '{"code"}',
