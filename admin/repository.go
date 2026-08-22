@@ -452,16 +452,20 @@ func (r *Repository) PurgeExpiredSessions() error {
 // ── Audit log ──
 
 func (r *Repository) InsertAuditEvent(userID, orgID, eventType string, details map[string]interface{}, ip, userAgent string) error {
-	var payload []byte
+	// Marshal to string (not []byte): pgx's simple-protocol mode (required
+	// behind transaction poolers) would otherwise send []byte as a bytea
+	// literal, which has no cast to the jsonb details column.
+	var payload string
 	if len(details) > 0 {
-		var err error
-		if payload, err = json.Marshal(details); err != nil {
+		b, err := json.Marshal(details)
+		if err != nil {
 			return fmt.Errorf("marshal audit details: %w", err)
 		}
+		payload = string(b)
 	}
 	_, err := r.db.Exec(`
 		INSERT INTO audit_events (user_id, org_id, event_type, details, ip_address, user_agent)
-		VALUES (NULLIF($1,'')::uuid, NULLIF($2,'')::uuid, $3, $4, NULLIF($5,'')::inet, NULLIF($6,''))
+		VALUES (NULLIF($1,'')::uuid, NULLIF($2,'')::uuid, $3, NULLIF($4,'')::jsonb, NULLIF($5,'')::inet, NULLIF($6,''))
 	`, userID, orgID, eventType, payload, ip, userAgent)
 	return err
 }
