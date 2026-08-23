@@ -52,6 +52,12 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	orgs, err := a.Admin.ListMembershipsForUser(claims.Subject)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, fmt.Errorf("organizations lookup error"))
+		return
+	}
+
 	out, err := json.Marshal(map[string]any{
 		"sub":                user.ID,
 		"email":              user.Email,
@@ -63,6 +69,7 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 		"picture":            user.Picture,
 		"is_platform_admin":  user.IsPlatformAdmin,
 		"roles":              roles,
+		"organizations":      orgs,
 	})
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, fmt.Errorf("userinfo marshalling error"))

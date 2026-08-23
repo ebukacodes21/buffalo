@@ -414,6 +414,197 @@ func (r *Repository) RotateClientSecret(id, secret string) error {
 	return nil
 }
 
+// ── Entitlements ──
+
+// OrgMembership is a user's membership in one organization together with
+// everything that organization is entitled to. It is what tokens and
+// userinfo expose so products can gate features on what was paid for.
+type OrgMembership struct {
+	OrgID        string   `json:"org_id"`
+	Slug         string   `json:"slug"`
+	Name         string   `json:"name"`
+	Role         string   `json:"role"`
+	Entitlements []string `json:"entitlements"`
+}
+
+var entitlementRe = regexp.MustCompile(`^[a-z0-9][a-z0-9:_-]{0,99}$`)
+
+// NormalizeEntitlements validates and dedupes entitlement keys. Keys are
+// namespaced per product, "<namespace>:<feature>", e.g. "acme:invoicing".
+func NormalizeEntitlements(items []string) ([]string, error) {
+	seen := make(map[string]bool, len(items))
+	out := make([]string, 0, len(items))
+	for _, raw := range items {
+		key := strings.ToLower(strings.TrimSpace(raw))
+		if key == "" {
+			continue
+		}
+		if !entitlementRe.MatchString(key) {
+			return nil, fmt.Errorf("invalid entitlement key %q (use lowercase letters, digits, ':', '_' or '-')", raw)
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, key)
+	}
+	if len(out) > 100 {
+		return nil, fmt.Errorf("too many entitlements (max 100)")
+	}
+	return out, nil
+}
+
+func (r *Repository) ListEntitlements(orgID string) ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT entitlement FROM org_entitlements WHERE org_id = $1 ORDER BY entitlement
+	`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []string{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		out = append(out, key)
+	}
+	return out, rows.Err()
+}
+
+// SetEntitlements replaces the full entitlement set for an organization in
+// one transaction. The console always sends the complete desired list.
+func (r *Repository) SetEntitlements(orgID string, items []string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.Exec(`DELETE FROM org_entitlements WHERE org_id = $1`, orgID); err != nil {
+		return err
+	}
+	for _, key := range items {
+		if _, err = tx.Exec(`
+			INSERT INTO org_entitlements (org_id, entitlement) VALUES ($1, $2)
+			ON CONFLICT (org_id, entitlement) DO NOTHING
+		`, orgID, key); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ListMembershipsForUser returns every organization the user belongs to,
+// with their role in it and that org's entitlements.
+func (r *Repository) ListMembershipsForUser(userID string) ([]OrgMembership, error) {
+	rows, err := r.db.Query(`
+		SELECT o.id, o.slug, o.name, m.role,
+		       COALESCE((
+		           SELECT array_agg(e.entitlement ORDER BY e.entitlement)
+		           FROM org_entitlements e WHERE e.org_id = o.id
+		       ), '{}')
+		FROM org_members m
+		JOIN organizations o ON o.id = m.org_id
+		WHERE m.user_id = $1 AND o.status = 'active'
+		ORDER BY o.created_at
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []OrgMembership{}
+	for rows.Next() {
+		var m OrgMembership
+		var ent any
+		if err := rows.Scan(&m.OrgID, &m.Slug, &m.Name, &m.Role, &ent); err != nil {
+			return nil, err
+		}
+		m.Entitlements = textArray(ent)
+		if m.Entitlements == nil {
+			m.Entitlements = []string{}
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ── Product module catalog ──
+
+// Module is one purchasable item of a product, e.g. terrasell/healthcare.
+// The catalog is data managed through the console; entitlement keys stored
+// on orgs are "<namespace>:<module_key>".
+type Module struct {
+	ID        string    `json:"id"`
+	Namespace string    `json:"namespace"`
+	Key       string    `json:"key"`
+	Label     string    `json:"label"`
+	Hint      string    `json:"hint"`
+	SortOrder int       `json:"sort_order"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+const moduleColumns = `id, namespace, module_key, label, hint, sort_order, created_at, updated_at`
+
+func (r *Repository) ListModules() ([]Module, error) {
+	rows, err := r.db.Query(`
+		SELECT ` + moduleColumns + ` FROM product_modules
+		ORDER BY namespace, sort_order, label
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []Module{}
+	for rows.Next() {
+		var m Module
+		if err := rows.Scan(&m.ID, &m.Namespace, &m.Key, &m.Label, &m.Hint,
+			&m.SortOrder, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) CreateModule(m *Module) error {
+	return r.db.QueryRow(`
+		INSERT INTO product_modules (namespace, module_key, label, hint, sort_order)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, created_at, updated_at
+	`, m.Namespace, m.Key, m.Label, m.Hint, m.SortOrder).
+		Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt)
+}
+
+func (r *Repository) UpdateModule(id string, label, hint string, sortOrder int) error {
+	res, err := r.db.Exec(`
+		UPDATE product_modules SET label = $2, hint = $3, sort_order = $4, updated_at = NOW() WHERE id = $1
+	`, id, label, hint, sortOrder)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DeleteModule(id string) error {
+	res, err := r.db.Exec(`DELETE FROM product_modules WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ── Admin sessions ──
 
 func (r *Repository) CreateAdminSession(userID, token string, expiresAt time.Time) error {
@@ -600,12 +791,18 @@ func createUserTx(tx *sql.Tx, u *users.User) error {
 	return err
 }
 
-func isUniqueViolation(err error) bool {
+// IsUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505).
+func IsUniqueViolation(err error) bool {
 	type coder interface{ SQLState() string }
 	if c, ok := err.(coder); ok {
 		return c.SQLState() == "23505"
 	}
 	return strings.Contains(err.Error(), "duplicate key")
+}
+
+func isUniqueViolation(err error) bool {
+	return IsUniqueViolation(err)
 }
 
 var slugStrip = regexp.MustCompile(`[^a-z0-9]+`)

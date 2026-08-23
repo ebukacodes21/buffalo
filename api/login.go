@@ -79,6 +79,11 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 		} else {
 			payload.User.Roles = roles
 		}
+		if orgs, err := a.Admin.ListMembershipsForUser(user.ID); err != nil {
+			log.Printf("error loading org memberships for %s: %s", user.ID, err)
+		} else {
+			payload.Organizations = orgs
+		}
 		a.CodePool[code] = payload
 
 		if r.PostForm.Get("remember") == "on" {

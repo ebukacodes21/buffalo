@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ebukacodes21/buffalo/admin"
 	"github.com/ebukacodes21/buffalo/oidc"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -77,17 +78,22 @@ func (a *api) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if payload.Organizations == nil {
+		payload.Organizations = []admin.OrgMembership{}
+	}
+
 	//access token
 	token = jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"sub":   payload.User.Sub,
-		"iss":   a.Config.Url,
-		"aud":   []string{fmt.Sprintf("%s/userinfo", a.Config.Url)},
-		"email": payload.User.Email,
-		"roles": payload.User.Roles,
-		"name":  payload.User.Name,
-		"exp":   time.Now().Add(1 * time.Hour).Unix(),
-		"nbf":   time.Now().Unix(),
-		"iat":   time.Now().Unix(),
+		"sub":           payload.User.Sub,
+		"iss":           a.Config.Url,
+		"aud":           []string{fmt.Sprintf("%s/userinfo", a.Config.Url)},
+		"email":         payload.User.Email,
+		"roles":         payload.User.Roles,
+		"organizations": payload.Organizations,
+		"name":          payload.User.Name,
+		"exp":           time.Now().Add(1 * time.Hour).Unix(),
+		"nbf":           time.Now().Unix(),
+		"iat":           time.Now().Unix(),
 	})
 
 	token.Header["kid"] = "buffalo_v1"

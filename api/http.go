@@ -35,6 +35,7 @@ func Start(httpServer *http.Server, privateKey []byte, config Config, db *sql.DB
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", a.index)
+	mux.HandleFunc("/health", a.health)
 	mux.HandleFunc("/authorization", a.authorization)
 	mux.HandleFunc("/token", a.token)
 	mux.HandleFunc("/login", a.login)
@@ -50,6 +51,7 @@ func Start(httpServer *http.Server, privateKey []byte, config Config, db *sql.DB
 	mux.HandleFunc("POST /api/admin/businesses", a.adminAPIGuard(a.apiBusinessOnboard))
 	mux.HandleFunc("GET /api/admin/businesses/{id}", a.adminAPIGuard(a.apiBusinessDetail))
 	mux.HandleFunc("POST /api/admin/businesses/{id}/status", a.adminAPIGuard(a.apiBusinessStatus))
+	mux.HandleFunc("POST /api/admin/businesses/{id}/entitlements", a.adminAPIGuard(a.apiBusinessEntitlements))
 	mux.HandleFunc("POST /api/admin/businesses/{id}/members/add", a.adminAPIGuard(a.apiMemberAdd))
 	mux.HandleFunc("POST /api/admin/businesses/{id}/members/{memberID}/role", a.adminAPIGuard(a.apiMemberRole))
 	mux.HandleFunc("POST /api/admin/businesses/{id}/members/{memberID}/remove", a.adminAPIGuard(a.apiMemberRemove))
@@ -58,6 +60,10 @@ func Start(httpServer *http.Server, privateKey []byte, config Config, db *sql.DB
 	mux.HandleFunc("GET /api/admin/apps/{id}", a.adminAPIGuard(a.apiAppDetail))
 	mux.HandleFunc("POST /api/admin/apps/{id}/update", a.adminAPIGuard(a.apiAppUpdate))
 	mux.HandleFunc("POST /api/admin/apps/{id}/rotate", a.adminAPIGuard(a.apiAppRotate))
+	mux.HandleFunc("GET /api/admin/modules", a.adminAPIGuard(a.apiModuleList))
+	mux.HandleFunc("POST /api/admin/modules", a.adminAPIGuard(a.apiModuleCreate))
+	mux.HandleFunc("POST /api/admin/modules/{id}/update", a.adminAPIGuard(a.apiModuleUpdate))
+	mux.HandleFunc("POST /api/admin/modules/{id}/remove", a.adminAPIGuard(a.apiModuleRemove))
 	mux.HandleFunc("GET /api/admin/users", a.adminAPIGuard(a.apiUserList))
 	mux.HandleFunc("POST /api/admin/users/{id}/active", a.adminAPIGuard(a.apiUserSetActive))
 	mux.HandleFunc("GET /api/admin/audit", a.adminAPIGuard(a.apiAuditList))
@@ -71,4 +77,11 @@ func apiError(w http.ResponseWriter, code int, err error) {
 	w.WriteHeader(code)
 	w.Write([]byte(err.Error()))
 	fmt.Printf("error: %s\n", err)
+}
+
+// health backs the healthCheckPath declared in render.yaml.
+func (a *api) health(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
 }

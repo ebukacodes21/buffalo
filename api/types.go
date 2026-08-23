@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	"github.com/ebukacodes21/buffalo/admin"
 	"github.com/ebukacodes21/buffalo/users"
 )
 
@@ -31,4 +32,7 @@ type Payload struct {
 	CodeIssuedAt time.Time
 	User         users.User
 	AppConfig    AppConfig
+	// Organizations carries each org the user belongs to (role + paid
+	// entitlements) so products can gate features without extra round trips.
+	Organizations []admin.OrgMembership
 }

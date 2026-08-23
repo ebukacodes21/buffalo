@@ -209,6 +209,7 @@ func (a *api) loadOrgOr404(w http.ResponseWriter, r *http.Request) (*admin.Organ
 
 type businessDetail struct {
 	Organization *admin.Organization `json:"organization"`
+	Entitlements []string            `json:"entitlements"`
 	Members      []admin.Member      `json:"members"`
 	Audit        []admin.AuditEvent  `json:"audit"`
 }
@@ -218,12 +219,50 @@ func (a *api) apiBusinessDetail(w http.ResponseWriter, r *http.Request, actor *u
 	if !ok {
 		return
 	}
+	entitlements, _ := a.Admin.ListEntitlements(org.ID)
 	members, _ := a.Admin.ListMembers(org.ID)
 	events, _ := a.Admin.ListAuditEvents(org.ID, 20)
 
 	writeJSON(w, http.StatusOK, businessDetail{
-		Organization: org, Members: members, Audit: events,
+		Organization: org, Entitlements: entitlements, Members: members, Audit: events,
 	})
+}
+
+type entitlementsRequest struct {
+	Entitlements []string `json:"entitlements"`
+}
+
+// apiBusinessEntitlements replaces the paid entitlement set for a business.
+// The console sends the complete desired list; products observe the change
+// via token claims / userinfo and gate their features accordingly.
+func (a *api) apiBusinessEntitlements(w http.ResponseWriter, r *http.Request, actor *users.User) {
+	org, ok := a.loadOrgOr404(w, r)
+	if !ok {
+		return
+	}
+	var req entitlementsRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	items, err := admin.NormalizeEntitlements(req.Entitlements)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	before, err := a.Admin.ListEntitlements(org.ID)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := a.Admin.SetEntitlements(org.ID, items); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.auditAPI(r, actor, "org.entitlements_changed", org.ID, map[string]interface{}{
+		"from": before, "to": items,
+	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"entitlements": items})
 }
 
 type statusRequest struct {
@@ -533,6 +572,136 @@ func (a *api) apiAppRotate(w http.ResponseWriter, r *http.Request, actor *users.
 		"client_id":          client.ClientID,
 		"client_secret_once": secret,
 	})
+}
+
+// ── Product module catalog ──
+
+func (a *api) apiModuleList(w http.ResponseWriter, r *http.Request, actor *users.User) {
+	modules, err := a.Admin.ListModules()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"modules": modules})
+}
+
+type createModuleRequest struct {
+	Namespace string `json:"namespace"`
+	Key       string `json:"key"`
+	Label     string `json:"label"`
+	Hint      string `json:"hint"`
+	SortOrder int    `json:"sort_order"`
+}
+
+func (a *api) apiModuleCreate(w http.ResponseWriter, r *http.Request, actor *users.User) {
+	var req createModuleRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.Namespace = strings.ToLower(strings.TrimSpace(req.Namespace))
+	req.Key = strings.ToLower(strings.TrimSpace(req.Key))
+	req.Label = strings.TrimSpace(req.Label)
+	if req.Namespace == "" || req.Key == "" || req.Label == "" {
+		writeJSONError(w, http.StatusBadRequest, "namespace, key and label are required")
+		return
+	}
+	if !validNamespaceKey(req.Namespace) || !validNamespaceKey(req.Key) {
+		writeJSONError(w, http.StatusBadRequest, "namespace and key must be lowercase letters, digits, '_' or '-'")
+		return
+	}
+	module := &admin.Module{
+		Namespace: req.Namespace,
+		Key:       req.Key,
+		Label:     req.Label,
+		Hint:      strings.TrimSpace(req.Hint),
+		SortOrder: req.SortOrder,
+	}
+	if err := a.Admin.CreateModule(module); err != nil {
+		if admin.IsUniqueViolation(err) {
+			writeJSONError(w, http.StatusConflict,
+				fmt.Sprintf("module %s:%s already exists", req.Namespace, req.Key))
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.auditAPI(r, actor, "module.created", "", map[string]interface{}{
+		"namespace": module.Namespace, "key": module.Key, "label": module.Label,
+	})
+	writeJSON(w, http.StatusCreated, map[string]interface{}{"module": module})
+}
+
+type updateModuleRequest struct {
+	Label     string `json:"label"`
+	Hint      string `json:"hint"`
+	SortOrder int    `json:"sort_order"`
+}
+
+func (a *api) apiModuleUpdate(w http.ResponseWriter, r *http.Request, actor *users.User) {
+	var req updateModuleRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.Label = strings.TrimSpace(req.Label)
+	if req.Label == "" {
+		writeJSONError(w, http.StatusBadRequest, "label is required")
+		return
+	}
+	id := r.PathValue("id")
+	if err := a.Admin.UpdateModule(id, req.Label, strings.TrimSpace(req.Hint), req.SortOrder); err != nil {
+		writeJSONError(w, mapRepoStatus(err), err.Error())
+		return
+	}
+	a.auditAPI(r, actor, "module.updated", "", map[string]interface{}{
+		"id": id, "label": req.Label,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (a *api) apiModuleRemove(w http.ResponseWriter, r *http.Request, actor *users.User) {
+	id := r.PathValue("id")
+	modules, _ := a.Admin.ListModules()
+	var removed *admin.Module
+	for i := range modules {
+		if modules[i].ID == id {
+			removed = &modules[i]
+			break
+		}
+	}
+	if err := a.Admin.DeleteModule(id); err != nil {
+		writeJSONError(w, mapRepoStatus(err), err.Error())
+		return
+	}
+	details := map[string]interface{}{"id": id}
+	if removed != nil {
+		details["namespace"] = removed.Namespace
+		details["key"] = removed.Key
+	}
+	a.auditAPI(r, actor, "module.removed", "", details)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+func validNamespaceKey(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func mapRepoStatus(err error) int {
+	if err == admin.ErrNotFound {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
 }
 
 // ── People ──
