@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/ebukacodes21/buffalo/admin"
 	"github.com/ebukacodes21/buffalo/api"
 	"github.com/ebukacodes21/buffalo/db"
 	"github.com/ebukacodes21/buffalo/tooling"
@@ -64,10 +63,6 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer database.Close()
-
-	if err := admin.SeedDefaultClients(database); err != nil {
-		log.Fatalf("failed to seed default clients: %v", err)
-	}
 
 	fmt.Printf("api stopped: %s", api.Start(&http.Server{Addr: ":8089"}, privateKey, api.Config{Url: issuerURL()}, database))
 }

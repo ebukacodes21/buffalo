@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"io/fs"
 	"net/http"
 
 	"github.com/ebukacodes21/buffalo/admin"
@@ -34,12 +35,20 @@ func newApi(privateKey []byte, config Config, db *sql.DB) *api {
 	}
 }
 
+func staticHandler() http.Handler {
+	sub, err := fs.Sub(staticFs, "static")
+	if err != nil {
+		panic(fmt.Sprintf("static assets missing: %v", err))
+	}
+	return http.StripPrefix("/static/", http.FileServer(http.FS(sub)))
+}
+
 func Start(httpServer *http.Server, privateKey []byte, config Config, db *sql.DB) error {
 	a := newApi(privateKey, config, db)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", a.index)
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFs))))
+	mux.Handle("GET /static/", staticHandler())
 	mux.HandleFunc("/health", a.health)
 	mux.HandleFunc("/authorization", a.authorization)
 	mux.HandleFunc("/token", a.token)
@@ -69,6 +78,12 @@ func Start(httpServer *http.Server, privateKey []byte, config Config, db *sql.DB
 	mux.HandleFunc("POST /api/admin/modules", a.adminAPIGuard(a.apiModuleCreate))
 	mux.HandleFunc("POST /api/admin/modules/{id}/update", a.adminAPIGuard(a.apiModuleUpdate))
 	mux.HandleFunc("POST /api/admin/modules/{id}/remove", a.adminAPIGuard(a.apiModuleRemove))
+	mux.HandleFunc("GET /api/admin/apps/{id}/menu", a.adminAPIGuard(a.apiMenuList))
+	mux.HandleFunc("POST /api/admin/apps/{id}/menu", a.adminAPIGuard(a.apiMenuCreate))
+	mux.HandleFunc("POST /api/admin/apps/{id}/menu/{item_id}/update", a.adminAPIGuard(a.apiMenuUpdate))
+	mux.HandleFunc("POST /api/admin/apps/{id}/menu/{item_id}/remove", a.adminAPIGuard(a.apiMenuRemove))
+	// Product-facing pull: products fetch their sidemenu with OAuth creds.
+	mux.HandleFunc("POST /api/product/menu", a.productMenu)
 	mux.HandleFunc("GET /api/admin/users", a.adminAPIGuard(a.apiUserList))
 	mux.HandleFunc("POST /api/admin/users/{id}/active", a.adminAPIGuard(a.apiUserSetActive))
 	mux.HandleFunc("GET /api/admin/audit", a.adminAPIGuard(a.apiAuditList))

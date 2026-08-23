@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -43,14 +44,17 @@ type Member struct {
 }
 
 type Client struct {
-	ID           string    `json:"id"`
-	ClientID     string    `json:"client_id"`
-	ClientSecret string    `json:"client_secret,omitempty"`
-	SecretOnce   string    `json:"secret_once,omitempty"`
-	Name         string    `json:"name"`
-	RedirectURIs []string  `json:"redirect_uris"`
-	IsActive     bool      `json:"is_active"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string   `json:"id"`
+	ClientID     string   `json:"client_id"`
+	ClientSecret string   `json:"client_secret,omitempty"`
+	SecretOnce   string   `json:"secret_once,omitempty"`
+	Name         string   `json:"name"`
+	RedirectURIs []string `json:"redirect_uris"`
+	IsActive     bool     `json:"is_active"`
+	// ModuleNamespace ties the product to its purchasable-module catalog
+	// (product_modules.namespace). Empty for non-selling apps.
+	ModuleNamespace string    `json:"module_namespace"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type AuditEvent struct {
@@ -279,7 +283,7 @@ func (r *Repository) RemoveMember(orgID, memberID string) error {
 
 // ── OAuth Clients ──
 
-const clientColumns = `id, client_id, client_secret, name, redirect_uris, is_active, created_at`
+const clientColumns = `id, client_id, client_secret, name, redirect_uris, is_active, module_namespace, created_at`
 
 // textArray converts a Postgres TEXT[] value as delivered by the pgx
 // stdlib driver ([]string or "{a,b}" literal) into a []string.
@@ -322,7 +326,7 @@ func parseTextArrayLiteral(s string) []string {
 func scanClient(row interface{ Scan(...any) error }) (*Client, error) {
 	c := &Client{}
 	var uris any
-	err := row.Scan(&c.ID, &c.ClientID, &c.ClientSecret, &c.Name, &uris, &c.IsActive, &c.CreatedAt)
+	err := row.Scan(&c.ID, &c.ClientID, &c.ClientSecret, &c.Name, &uris, &c.IsActive, &c.ModuleNamespace, &c.CreatedAt)
 	c.RedirectURIs = textArray(uris)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -372,7 +376,7 @@ func (r *Repository) ListClients(search string, limit int) ([]ClientRow, error) 
 		var row ClientRow
 		var uris any
 		if err := rows.Scan(&row.ID, &row.ClientID, &row.ClientSecret, &row.Name,
-			&uris, &row.IsActive, &row.CreatedAt); err != nil {
+			&uris, &row.IsActive, &row.ModuleNamespace, &row.CreatedAt); err != nil {
 			return nil, err
 		}
 		row.RedirectURIs = textArray(uris)
@@ -381,10 +385,10 @@ func (r *Repository) ListClients(search string, limit int) ([]ClientRow, error) 
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateClient(id, name string, redirectURIs []string, isActive bool) error {
+func (r *Repository) UpdateClient(id, name string, redirectURIs []string, isActive bool, moduleNamespace string) error {
 	res, err := r.db.Exec(`
-		UPDATE oauth_clients SET name = $2, redirect_uris = $3, is_active = $4, updated_at = NOW() WHERE id = $1
-	`, id, name, redirectURIs, isActive)
+		UPDATE oauth_clients SET name = $2, redirect_uris = $3, is_active = $4, module_namespace = $5, updated_at = NOW() WHERE id = $1
+	`, id, name, redirectURIs, isActive, moduleNamespace)
 	if err != nil {
 		return err
 	}
@@ -396,10 +400,10 @@ func (r *Repository) UpdateClient(id, name string, redirectURIs []string, isActi
 
 func (r *Repository) CreateClient(c *Client) error {
 	return r.db.QueryRow(`
-		INSERT INTO oauth_clients (client_id, client_secret, name, redirect_uris)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO oauth_clients (client_id, client_secret, name, redirect_uris, module_namespace)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, is_active, created_at
-	`, c.ClientID, c.ClientSecret, c.Name, c.RedirectURIs).
+	`, c.ClientID, c.ClientSecret, c.Name, c.RedirectURIs, c.ModuleNamespace).
 		Scan(&c.ID, &c.IsActive, &c.CreatedAt)
 }
 
@@ -603,6 +607,107 @@ func (r *Repository) DeleteModule(id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ── Sidemenu items ──
+
+type SidemenuItem struct {
+	ID                  string    `json:"id"`
+	ClientID            string    `json:"client_id"`
+	Label               string    `json:"label"`
+	Icon                string    `json:"icon"`
+	Href                string    `json:"href"`
+	Section             string    `json:"section"`
+	RequiredEntitlement string    `json:"required_entitlement"`
+	SortOrder           int       `json:"sort_order"`
+	IsActive            bool      `json:"is_active"`
+	CreatedAt           time.Time `json:"created_at"`
+}
+
+const sidemenuColumns = `id, client_id, label, icon, href, section, required_entitlement, sort_order, is_active, created_at`
+
+func scanSidemenuItem(row interface{ Scan(...any) error }) (*SidemenuItem, error) {
+	item := &SidemenuItem{}
+	err := row.Scan(&item.ID, &item.ClientID, &item.Label, &item.Icon, &item.Href,
+		&item.Section, &item.RequiredEntitlement, &item.SortOrder, &item.IsActive, &item.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+func (r *Repository) ListSidemenuItems(clientID string, activeOnly bool) ([]SidemenuItem, error) {
+	query := `SELECT ` + sidemenuColumns + ` FROM sidemenu_items WHERE client_id = $1`
+	if activeOnly {
+		query += ` AND is_active`
+	}
+	query += ` ORDER BY sort_order, created_at`
+	rows, err := r.db.Query(query, clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []SidemenuItem{}
+	for rows.Next() {
+		item, err := scanSidemenuItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) CreateSidemenuItem(item *SidemenuItem) error {
+	return r.db.QueryRow(`
+		INSERT INTO sidemenu_items (client_id, label, icon, href, section, required_entitlement, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, is_active, created_at
+	`, item.ClientID, item.Label, item.Icon, item.Href, item.Section, item.RequiredEntitlement, item.SortOrder).
+		Scan(&item.ID, &item.IsActive, &item.CreatedAt)
+}
+
+func (r *Repository) UpdateSidemenuItem(id string, item *SidemenuItem) error {
+	res, err := r.db.Exec(`
+		UPDATE sidemenu_items
+		SET label = $2, icon = $3, href = $4, section = $5, required_entitlement = $6, sort_order = $7, is_active = $8
+		WHERE id = $1
+	`, id, item.Label, item.Icon, item.Href, item.Section, item.RequiredEntitlement, item.SortOrder, item.IsActive)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DeleteSidemenuItem(id string) error {
+	res, err := r.db.Exec(`DELETE FROM sidemenu_items WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClientCredentialsValid checks a client_id/client_secret pair for the
+// product-facing menu pull endpoint.
+func (r *Repository) ClientCredentialsValid(clientID, clientSecret string) bool {
+	var stored string
+	err := r.db.QueryRow(`
+		SELECT client_secret FROM oauth_clients WHERE client_id = $1 AND is_active
+	`, clientID).Scan(&stored)
+	if err != nil || stored == "" || clientSecret == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(stored), []byte(clientSecret)) == 1
 }
 
 // ── Admin sessions ──

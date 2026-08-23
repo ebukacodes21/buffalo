@@ -109,7 +109,6 @@
             position: absolute; bottom: 36px; left: 0; right: 0;
             text-align: center; z-index: 2;
         }
-        .brand-footer img { height: 34px; width: auto; margin-bottom: 12px; opacity: 0.95; }
         .brand-footer p {
             font-family: var(--font-sans);
             font-size: 10px; color: rgba(255,255,255);
@@ -121,6 +120,10 @@
             width: 520px; min-width: 520px;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
             padding: 60px; background: var(--white); position: relative;
+        }
+        .panel-logo {
+            position: absolute; top: 32px; left: 60px;
+            height: 30px; width: auto;
         }
         .login-panel::before {
             content: ''; position: absolute; top: 0; left: 0;
@@ -241,7 +244,7 @@
         .powered-by {
             position: absolute; bottom: 24px; left: 0; right: 0;
             text-align: center; font-size: 10px; color: var(--gray-10); letter-spacing: 1.5px;
-            text-transform: uppercase; line-height: 2;
+            text-transform: uppercase;
         }
         .powered-by span { font-weight: 500; color: var(--gray-1); }
 
@@ -252,6 +255,7 @@
         }
         @media (max-width: 480px) {
             .login-panel { padding: 40px 24px; }
+            .panel-logo { top: 24px; left: 24px; }
         }
     </style>
     {{block "head" .}}{{end}}
@@ -264,16 +268,16 @@
             {{block "brandExtra" .}}<div class="brand-divider"></div>{{end}}
         </div>
         <div class="brand-footer">
-            <img src="/static/arkad-logo.png" alt="Arkad Business Solutions logo">
             <p>Powered by Arkad Business Solutions</p>
         </div>
     </div>
 
     <div class="login-panel">
+        <img class="panel-logo" src="/static/arkad-logo.png" alt="Arkad Business Solutions logo">
         <div class="login-container">
             {{template "content" .}}
         </div>
-        <div class="powered-by">Powered by <span>Arkad Business Solutions</span><br>Secured by <span>Buffalo</span></div>
+        <div class="powered-by">Secured by <span>Buffalo</span></div>
     </div>
     {{block "scripts" .}}{{end}}
 </body>

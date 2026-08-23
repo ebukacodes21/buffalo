@@ -521,9 +521,10 @@ func (a *api) apiAppDetail(w http.ResponseWriter, r *http.Request, actor *users.
 }
 
 type updateAppRequest struct {
-	Name         string   `json:"name"`
-	RedirectURIs []string `json:"redirect_uris"`
-	IsActive     bool     `json:"is_active"`
+	Name            string   `json:"name"`
+	RedirectURIs    []string `json:"redirect_uris"`
+	IsActive        bool     `json:"is_active"`
+	ModuleNamespace string   `json:"module_namespace"`
 }
 
 func (a *api) apiAppUpdate(w http.ResponseWriter, r *http.Request, actor *users.User) {
@@ -541,12 +542,18 @@ func (a *api) apiAppUpdate(w http.ResponseWriter, r *http.Request, actor *users.
 		writeJSONError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if err := a.Admin.UpdateClient(client.ID, req.Name, firstNonEmptySlice(req.RedirectURIs, client.RedirectURIs), req.IsActive); err != nil {
+	req.ModuleNamespace = strings.ToLower(strings.TrimSpace(req.ModuleNamespace))
+	if req.ModuleNamespace != "" && !validNamespaceKey(req.ModuleNamespace) {
+		writeJSONError(w, http.StatusBadRequest, "module_namespace must be lowercase letters, digits, _ or -")
+		return
+	}
+	if err := a.Admin.UpdateClient(client.ID, req.Name, firstNonEmptySlice(req.RedirectURIs, client.RedirectURIs), req.IsActive, req.ModuleNamespace); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	a.auditAPI(r, actor, "app.updated", "", map[string]interface{}{
 		"client_id": client.ClientID, "redirect_uris": req.RedirectURIs, "active": req.IsActive,
+		"module_namespace": req.ModuleNamespace,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
@@ -681,6 +688,141 @@ func (a *api) apiModuleRemove(w http.ResponseWriter, r *http.Request, actor *use
 	}
 	a.auditAPI(r, actor, "module.removed", "", details)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+// ── Sidemenu registry ──
+
+type sidemenuItemRequest struct {
+	Label               string `json:"label"`
+	Icon                string `json:"icon"`
+	Href                string `json:"href"`
+	Section             string `json:"section"`
+	RequiredEntitlement string `json:"required_entitlement"`
+	SortOrder           int    `json:"sort_order"`
+	IsActive            *bool  `json:"is_active"`
+}
+
+func (req *sidemenuItemRequest) normalize() error {
+	req.Label = strings.TrimSpace(req.Label)
+	req.Href = strings.TrimSpace(req.Href)
+	req.Section = strings.TrimSpace(req.Section)
+	req.RequiredEntitlement = strings.ToLower(strings.TrimSpace(req.RequiredEntitlement))
+	if req.Label == "" || req.Href == "" {
+		return fmt.Errorf("label and href are required")
+	}
+	if req.RequiredEntitlement != "" && !validEntitlementKey(req.RequiredEntitlement) {
+		return fmt.Errorf("required_entitlement must look like namespace:key")
+	}
+	return nil
+}
+
+func (a *api) apiMenuList(w http.ResponseWriter, r *http.Request, actor *users.User) {
+	client, ok := a.loadAppOr404(w, r)
+	if !ok {
+		return
+	}
+	items, err := a.Admin.ListSidemenuItems(client.ClientID, false)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func (a *api) apiMenuCreate(w http.ResponseWriter, r *http.Request, actor *users.User) {
+	client, ok := a.loadAppOr404(w, r)
+	if !ok {
+		return
+	}
+	var req sidemenuItemRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := req.normalize(); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	item := &admin.SidemenuItem{
+		ClientID:            client.ClientID,
+		Label:               req.Label,
+		Icon:                strings.TrimSpace(req.Icon),
+		Href:                req.Href,
+		Section:             req.Section,
+		RequiredEntitlement: req.RequiredEntitlement,
+		SortOrder:           req.SortOrder,
+	}
+	if err := a.Admin.CreateSidemenuItem(item); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.auditAPI(r, actor, "menu.created", client.ID, map[string]interface{}{
+		"item_id": item.ID, "label": item.Label, "href": item.Href,
+		"required_entitlement": item.RequiredEntitlement,
+	})
+	writeJSON(w, http.StatusCreated, map[string]interface{}{"item": item})
+}
+
+func (a *api) apiMenuUpdate(w http.ResponseWriter, r *http.Request, actor *users.User) {
+	client, ok := a.loadAppOr404(w, r)
+	if !ok {
+		return
+	}
+	var req sidemenuItemRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := req.normalize(); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+	item := &admin.SidemenuItem{
+		ClientID:            client.ClientID,
+		Label:               req.Label,
+		Icon:                strings.TrimSpace(req.Icon),
+		Href:                req.Href,
+		Section:             req.Section,
+		RequiredEntitlement: req.RequiredEntitlement,
+		SortOrder:           req.SortOrder,
+		IsActive:            isActive,
+	}
+	id := r.PathValue("item_id")
+	if err := a.Admin.UpdateSidemenuItem(id, item); err != nil {
+		writeJSONError(w, mapRepoStatus(err), err.Error())
+		return
+	}
+	a.auditAPI(r, actor, "menu.updated", client.ID, map[string]interface{}{
+		"item_id": id, "label": item.Label, "active": item.IsActive,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (a *api) apiMenuRemove(w http.ResponseWriter, r *http.Request, actor *users.User) {
+	client, ok := a.loadAppOr404(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("item_id")
+	if err := a.Admin.DeleteSidemenuItem(id); err != nil {
+		writeJSONError(w, mapRepoStatus(err), err.Error())
+		return
+	}
+	a.auditAPI(r, actor, "menu.removed", client.ID, map[string]interface{}{"item_id": id})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+// validEntitlementKey checks the namespace:key format of org_entitlements.
+func validEntitlementKey(s string) bool {
+	i := strings.IndexByte(s, ':')
+	if i <= 0 || i == len(s)-1 {
+		return false
+	}
+	return validNamespaceKey(s[:i]) && validNamespaceKey(s[i+1:])
 }
 
 func validNamespaceKey(s string) bool {
