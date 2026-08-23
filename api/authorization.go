@@ -42,6 +42,20 @@ func (a *api) authorization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// PKCE is optional for confidential clients but the only viable mode for
+	// public ones (mobile apps) — they cannot hold a client secret.
+	codeChallenge := r.URL.Query().Get("code_challenge")
+	codeChallengeMethod := r.URL.Query().Get("code_challenge_method")
+	if codeChallenge != "" {
+		if codeChallengeMethod == "" {
+			codeChallengeMethod = "plain"
+		}
+		if codeChallengeMethod != "S256" && codeChallengeMethod != "plain" {
+			apiError(w, http.StatusBadRequest, fmt.Errorf("unsupported code_challenge_method"))
+			return
+		}
+	}
+
 	// OAuth clients live in the database (managed via the Arkad console).
 	appConfig := AppConfig{}
 	client, err := a.Admin.GetActiveClientByClientID(clientID)
@@ -81,12 +95,14 @@ func (a *api) authorization(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.SessionPool[sessID] = Payload{
-		ClientID:     clientID,
-		RedirectURI:  redirectURI,
-		ResponseType: responseType,
-		Scope:        scope,
-		State:        state,
-		AppConfig:    appConfig,
+		ClientID:            clientID,
+		RedirectURI:         redirectURI,
+		ResponseType:        responseType,
+		Scope:               scope,
+		State:               state,
+		AppConfig:           appConfig,
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: codeChallengeMethod,
 	}
 
 	http.SetCookie(w, &http.Cookie{

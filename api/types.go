@@ -32,6 +32,11 @@ type Payload struct {
 	CodeIssuedAt time.Time
 	User         users.User
 	AppConfig    AppConfig
+	// PKCE (RFC 7636): public clients (mobile apps) bind the authorization
+	// code to a verifier instead of a client secret. Empty for confidential
+	// clients, which keep authenticating with client_secret.
+	CodeChallenge       string
+	CodeChallengeMethod string
 	// Organizations carries each org the user belongs to (role + paid
 	// entitlements) so products can gate features without extra round trips.
 	Organizations []admin.OrgMembership
