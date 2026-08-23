@@ -84,6 +84,7 @@ func Start(httpServer *http.Server, privateKey []byte, config Config, db *sql.DB
 	mux.HandleFunc("POST /api/admin/apps/{id}/menu/{item_id}/remove", a.adminAPIGuard(a.apiMenuRemove))
 	// Product-facing pull: products fetch their sidemenu with OAuth creds.
 	mux.HandleFunc("POST /api/product/menu", a.productMenu)
+	mux.HandleFunc("POST /api/product/menu/definition", a.productMenuDefinition)
 	mux.HandleFunc("GET /api/admin/users", a.adminAPIGuard(a.apiUserList))
 	mux.HandleFunc("POST /api/admin/users/{id}/active", a.adminAPIGuard(a.apiUserSetActive))
 	mux.HandleFunc("GET /api/admin/audit", a.adminAPIGuard(a.apiAuditList))

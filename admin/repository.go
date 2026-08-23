@@ -621,15 +621,17 @@ type SidemenuItem struct {
 	RequiredEntitlement string    `json:"required_entitlement"`
 	SortOrder           int       `json:"sort_order"`
 	IsActive            bool      `json:"is_active"`
+	Source              string    `json:"source"`
 	CreatedAt           time.Time `json:"created_at"`
 }
 
-const sidemenuColumns = `id, client_id, label, icon, href, section, required_entitlement, sort_order, is_active, created_at`
+const sidemenuColumns = `id, client_id, label, icon, href, section, required_entitlement, sort_order, is_active, source, created_at`
 
 func scanSidemenuItem(row interface{ Scan(...any) error }) (*SidemenuItem, error) {
 	item := &SidemenuItem{}
 	err := row.Scan(&item.ID, &item.ClientID, &item.Label, &item.Icon, &item.Href,
-		&item.Section, &item.RequiredEntitlement, &item.SortOrder, &item.IsActive, &item.CreatedAt)
+		&item.Section, &item.RequiredEntitlement, &item.SortOrder, &item.IsActive,
+		&item.Source, &item.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -663,11 +665,15 @@ func (r *Repository) ListSidemenuItems(clientID string, activeOnly bool) ([]Side
 }
 
 func (r *Repository) CreateSidemenuItem(item *SidemenuItem) error {
+	source := item.Source
+	if source == "" {
+		source = "manual"
+	}
 	return r.db.QueryRow(`
-		INSERT INTO sidemenu_items (client_id, label, icon, href, section, required_entitlement, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO sidemenu_items (client_id, label, icon, href, section, required_entitlement, sort_order, source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, is_active, created_at
-	`, item.ClientID, item.Label, item.Icon, item.Href, item.Section, item.RequiredEntitlement, item.SortOrder).
+	`, item.ClientID, item.Label, item.Icon, item.Href, item.Section, item.RequiredEntitlement, item.SortOrder, source).
 		Scan(&item.ID, &item.IsActive, &item.CreatedAt)
 }
 
@@ -695,6 +701,29 @@ func (r *Repository) DeleteSidemenuItem(id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ReplaceProductSidemenuItems atomically swaps the product-synced menu rows
+// for a client. Rows with source='manual' (console additions) are preserved.
+func (r *Repository) ReplaceProductSidemenuItems(clientID string, items []*SidemenuItem) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM sidemenu_items WHERE client_id = $1 AND source = 'product'`, clientID); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if _, err := tx.Exec(`
+			INSERT INTO sidemenu_items (client_id, label, icon, href, section, required_entitlement, sort_order, source)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'product')
+		`, clientID, item.Label, item.Icon, item.Href, item.Section, item.RequiredEntitlement, item.SortOrder); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ClientCredentialsValid checks a client_id/client_secret pair for the
