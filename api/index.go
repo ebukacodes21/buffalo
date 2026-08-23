@@ -65,6 +65,13 @@ func (a *api) index(w http.ResponseWriter, r *http.Request) {
         .btn-primary-ext:hover { background: #1267cf; }
         .btn-secondary { background: transparent; color: rgba(255,255,255,0.8); border: 1px solid rgba(255,255,255,0.25); }
         .btn-secondary:hover { border-color: rgba(255,255,255,0.5); color: #fff; }
+        .footer {
+            position: fixed; bottom: 24px; left: 0; right: 0;
+            text-align: center;
+            font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+            color: rgba(255,255,255); line-height: 2;
+        }
+        .footer img { height: 34px; width: auto; display: block; margin: 0 auto 10px; opacity: 0.95; }
     </style>
 </head>
 <body>
@@ -73,6 +80,10 @@ func (a *api) index(w http.ResponseWriter, r *http.Request) {
         <p>Please start the sign-in flow from the application.</p>
         ` + continueBtn + `
         <button type="button" class="btn btn-secondary" id="backBtn" onclick="history.back()">Go back</button>
+    </div>
+    <div class="footer">
+        <img src="/static/arkad-logo.png" alt="Arkad Business Solutions logo">
+        Powered by Arkad Business Solutions<br>Secured by Buffalo
     </div>
     <script>
         if (history.length <= 1) {

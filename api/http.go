@@ -2,12 +2,16 @@ package api
 
 import (
 	"database/sql"
+	"embed"
 	"fmt"
 	"net/http"
 
 	"github.com/ebukacodes21/buffalo/admin"
 	"github.com/ebukacodes21/buffalo/users"
 )
+
+//go:embed static
+var staticFs embed.FS
 
 type api struct {
 	PrivateKey []byte
@@ -35,6 +39,7 @@ func Start(httpServer *http.Server, privateKey []byte, config Config, db *sql.DB
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", a.index)
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFs))))
 	mux.HandleFunc("/health", a.health)
 	mux.HandleFunc("/authorization", a.authorization)
 	mux.HandleFunc("/token", a.token)
