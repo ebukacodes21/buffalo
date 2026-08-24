@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -51,10 +50,10 @@ type Client struct {
 	Name         string   `json:"name"`
 	RedirectURIs []string `json:"redirect_uris"`
 	IsActive     bool     `json:"is_active"`
-	// ModuleNamespace ties the product to its purchasable-module catalog
-	// (product_modules.namespace). Empty for non-selling apps.
-	ModuleNamespace string    `json:"module_namespace"`
-	CreatedAt       time.Time `json:"created_at"`
+	// BaseURL is where the product serves its platform-facing API (used by
+	// the stateless console to reach GET endpoints like /api/product/*).
+	BaseURL   string    `json:"base_url"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type AuditEvent struct {
@@ -127,10 +126,6 @@ func (r *Repository) GetOrg(id string) (*Organization, error) {
 	return scanOrg(r.db.QueryRow(`SELECT `+orgColumns+` FROM organizations WHERE id = $1`, id))
 }
 
-func (r *Repository) GetOrgBySlug(slug string) (*Organization, error) {
-	return scanOrg(r.db.QueryRow(`SELECT `+orgColumns+` FROM organizations WHERE slug = $1`, slug))
-}
-
 type OrgRow struct {
 	Organization
 	MemberCount int `json:"member_count"`
@@ -165,17 +160,6 @@ func (r *Repository) ListOrgs(search string, limit int) ([]OrgRow, error) {
 
 func (r *Repository) SetOrgStatus(id, status string) error {
 	res, err := r.db.Exec(`UPDATE organizations SET status = $2, updated_at = NOW() WHERE id = $1`, id, status)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *Repository) RenameOrg(id, name string) error {
-	res, err := r.db.Exec(`UPDATE organizations SET name = $2, updated_at = NOW() WHERE id = $1`, id, name)
 	if err != nil {
 		return err
 	}
@@ -283,7 +267,7 @@ func (r *Repository) RemoveMember(orgID, memberID string) error {
 
 // ── OAuth Clients ──
 
-const clientColumns = `id, client_id, client_secret, name, redirect_uris, is_active, module_namespace, created_at`
+const clientColumns = `id, client_id, client_secret, name, redirect_uris, is_active, base_url, created_at`
 
 // textArray converts a Postgres TEXT[] value as delivered by the pgx
 // stdlib driver ([]string or "{a,b}" literal) into a []string.
@@ -326,7 +310,7 @@ func parseTextArrayLiteral(s string) []string {
 func scanClient(row interface{ Scan(...any) error }) (*Client, error) {
 	c := &Client{}
 	var uris any
-	err := row.Scan(&c.ID, &c.ClientID, &c.ClientSecret, &c.Name, &uris, &c.IsActive, &c.ModuleNamespace, &c.CreatedAt)
+	err := row.Scan(&c.ID, &c.ClientID, &c.ClientSecret, &c.Name, &uris, &c.IsActive, &c.BaseURL, &c.CreatedAt)
 	c.RedirectURIs = textArray(uris)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -376,7 +360,7 @@ func (r *Repository) ListClients(search string, limit int) ([]ClientRow, error) 
 		var row ClientRow
 		var uris any
 		if err := rows.Scan(&row.ID, &row.ClientID, &row.ClientSecret, &row.Name,
-			&uris, &row.IsActive, &row.ModuleNamespace, &row.CreatedAt); err != nil {
+			&uris, &row.IsActive, &row.BaseURL, &row.CreatedAt); err != nil {
 			return nil, err
 		}
 		row.RedirectURIs = textArray(uris)
@@ -385,10 +369,10 @@ func (r *Repository) ListClients(search string, limit int) ([]ClientRow, error) 
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateClient(id, name string, redirectURIs []string, isActive bool, moduleNamespace string) error {
+func (r *Repository) UpdateClient(id, name string, redirectURIs []string, isActive bool, baseURL string) error {
 	res, err := r.db.Exec(`
-		UPDATE oauth_clients SET name = $2, redirect_uris = $3, is_active = $4, module_namespace = $5, updated_at = NOW() WHERE id = $1
-	`, id, name, redirectURIs, isActive, moduleNamespace)
+		UPDATE oauth_clients SET name = $2, redirect_uris = $3, is_active = $4, base_url = $5, updated_at = NOW() WHERE id = $1
+	`, id, name, redirectURIs, isActive, baseURL)
 	if err != nil {
 		return err
 	}
@@ -400,10 +384,10 @@ func (r *Repository) UpdateClient(id, name string, redirectURIs []string, isActi
 
 func (r *Repository) CreateClient(c *Client) error {
 	return r.db.QueryRow(`
-		INSERT INTO oauth_clients (client_id, client_secret, name, redirect_uris, module_namespace)
+		INSERT INTO oauth_clients (client_id, client_secret, name, redirect_uris, base_url)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, is_active, created_at
-	`, c.ClientID, c.ClientSecret, c.Name, c.RedirectURIs, c.ModuleNamespace).
+	`, c.ClientID, c.ClientSecret, c.Name, c.RedirectURIs, c.BaseURL).
 		Scan(&c.ID, &c.IsActive, &c.CreatedAt)
 }
 
@@ -536,243 +520,7 @@ func (r *Repository) ListMembershipsForUser(userID string) ([]OrgMembership, err
 	return out, rows.Err()
 }
 
-// ── Product module catalog ──
-
-// Module is one purchasable item of a product, e.g. terrasell/healthcare.
-// The catalog is data managed through the console; entitlement keys stored
-// on orgs are "<namespace>:<module_key>".
-type Module struct {
-	ID        string    `json:"id"`
-	Namespace string    `json:"namespace"`
-	Key       string    `json:"key"`
-	Label     string    `json:"label"`
-	Hint      string    `json:"hint"`
-	SortOrder int       `json:"sort_order"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-const moduleColumns = `id, namespace, module_key, label, hint, sort_order, created_at, updated_at`
-
-func (r *Repository) ListModules() ([]Module, error) {
-	rows, err := r.db.Query(`
-		SELECT ` + moduleColumns + ` FROM product_modules
-		ORDER BY namespace, sort_order, label
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := []Module{}
-	for rows.Next() {
-		var m Module
-		if err := rows.Scan(&m.ID, &m.Namespace, &m.Key, &m.Label, &m.Hint,
-			&m.SortOrder, &m.CreatedAt, &m.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
-}
-
-func (r *Repository) CreateModule(m *Module) error {
-	return r.db.QueryRow(`
-		INSERT INTO product_modules (namespace, module_key, label, hint, sort_order)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, created_at, updated_at
-	`, m.Namespace, m.Key, m.Label, m.Hint, m.SortOrder).
-		Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt)
-}
-
-func (r *Repository) UpdateModule(id string, label, hint string, sortOrder int) error {
-	res, err := r.db.Exec(`
-		UPDATE product_modules SET label = $2, hint = $3, sort_order = $4, updated_at = NOW() WHERE id = $1
-	`, id, label, hint, sortOrder)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *Repository) DeleteModule(id string) error {
-	res, err := r.db.Exec(`DELETE FROM product_modules WHERE id = $1`, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-// ── Sidemenu items ──
-
-type SidemenuItem struct {
-	ID                  string    `json:"id"`
-	ClientID            string    `json:"client_id"`
-	Label               string    `json:"label"`
-	Icon                string    `json:"icon"`
-	Href                string    `json:"href"`
-	Section             string    `json:"section"`
-	RequiredEntitlement string    `json:"required_entitlement"`
-	SortOrder           int       `json:"sort_order"`
-	IsActive            bool      `json:"is_active"`
-	Source              string    `json:"source"`
-	CreatedAt           time.Time `json:"created_at"`
-}
-
-const sidemenuColumns = `id, client_id, label, icon, href, section, required_entitlement, sort_order, is_active, source, created_at`
-
-func scanSidemenuItem(row interface{ Scan(...any) error }) (*SidemenuItem, error) {
-	item := &SidemenuItem{}
-	err := row.Scan(&item.ID, &item.ClientID, &item.Label, &item.Icon, &item.Href,
-		&item.Section, &item.RequiredEntitlement, &item.SortOrder, &item.IsActive,
-		&item.Source, &item.CreatedAt)
-	if err == sql.ErrNoRows {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return item, nil
-}
-
-func (r *Repository) ListSidemenuItems(clientID string, activeOnly bool) ([]SidemenuItem, error) {
-	query := `SELECT ` + sidemenuColumns + ` FROM sidemenu_items WHERE client_id = $1`
-	if activeOnly {
-		query += ` AND is_active`
-	}
-	query += ` ORDER BY sort_order, created_at`
-	rows, err := r.db.Query(query, clientID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := []SidemenuItem{}
-	for rows.Next() {
-		item, err := scanSidemenuItem(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *item)
-	}
-	return out, rows.Err()
-}
-
-func (r *Repository) CreateSidemenuItem(item *SidemenuItem) error {
-	source := item.Source
-	if source == "" {
-		source = "manual"
-	}
-	return r.db.QueryRow(`
-		INSERT INTO sidemenu_items (client_id, label, icon, href, section, required_entitlement, sort_order, source)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, is_active, created_at
-	`, item.ClientID, item.Label, item.Icon, item.Href, item.Section, item.RequiredEntitlement, item.SortOrder, source).
-		Scan(&item.ID, &item.IsActive, &item.CreatedAt)
-}
-
-func (r *Repository) UpdateSidemenuItem(id string, item *SidemenuItem) error {
-	res, err := r.db.Exec(`
-		UPDATE sidemenu_items
-		SET label = $2, icon = $3, href = $4, section = $5, required_entitlement = $6, sort_order = $7, is_active = $8
-		WHERE id = $1
-	`, id, item.Label, item.Icon, item.Href, item.Section, item.RequiredEntitlement, item.SortOrder, item.IsActive)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *Repository) DeleteSidemenuItem(id string) error {
-	res, err := r.db.Exec(`DELETE FROM sidemenu_items WHERE id = $1`, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-// ReplaceProductSidemenuItems atomically swaps the product-synced menu rows
-// for a client. Rows with source='manual' (console additions) are preserved.
-func (r *Repository) ReplaceProductSidemenuItems(clientID string, items []*SidemenuItem) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`DELETE FROM sidemenu_items WHERE client_id = $1 AND source = 'product'`, clientID); err != nil {
-		return err
-	}
-	for _, item := range items {
-		if _, err := tx.Exec(`
-			INSERT INTO sidemenu_items (client_id, label, icon, href, section, required_entitlement, sort_order, source)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, 'product')
-		`, clientID, item.Label, item.Icon, item.Href, item.Section, item.RequiredEntitlement, item.SortOrder); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-// ClientCredentialsValid checks a client_id/client_secret pair for the
-// product-facing menu pull endpoint.
-func (r *Repository) ClientCredentialsValid(clientID, clientSecret string) bool {
-	var stored string
-	err := r.db.QueryRow(`
-		SELECT client_secret FROM oauth_clients WHERE client_id = $1 AND is_active
-	`, clientID).Scan(&stored)
-	if err != nil || stored == "" || clientSecret == "" {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(stored), []byte(clientSecret)) == 1
-}
-
 // ── Admin sessions ──
-
-func (r *Repository) CreateAdminSession(userID, token string, expiresAt time.Time) error {
-	_, err := r.db.Exec(`
-		INSERT INTO admin_sessions (token, user_id, expires_at) VALUES ($1, $2, $3)
-	`, token, userID, expiresAt)
-	return err
-}
-
-func (r *Repository) GetAdminSession(token string) (*users.User, error) {
-	u := &users.User{}
-	err := r.db.QueryRow(`
-		SELECT u.id, u.email, u.name, u.is_active, u.is_platform_admin
-		FROM admin_sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token = $1 AND s.expires_at > NOW()
-	`, token).Scan(&u.ID, &u.Email, &u.Name, &u.IsActive, &u.IsPlatformAdmin)
-	if err == sql.ErrNoRows {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return u, nil
-}
-
-func (r *Repository) DeleteAdminSession(token string) error {
-	_, err := r.db.Exec(`DELETE FROM admin_sessions WHERE token = $1`, token)
-	return err
-}
-
-func (r *Repository) PurgeExpiredSessions() error {
-	_, err := r.db.Exec(`DELETE FROM admin_sessions WHERE expires_at < NOW()`)
-	return err
-}
 
 // ── Audit log ──
 

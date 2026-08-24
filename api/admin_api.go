@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/ebukacodes21/buffalo/admin"
@@ -461,6 +462,16 @@ func (a *api) apiAppList(w http.ResponseWriter, r *http.Request, actor *users.Us
 type createAppRequest struct {
 	Name         string   `json:"name"`
 	RedirectURIs []string `json:"redirect_uris"`
+	BaseURL      string   `json:"base_url"`
+}
+
+// validBaseURL accepts http(s) URLs without query strings or fragments.
+func validBaseURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" || u.Query() != nil || u.Fragment != "" {
+		return false
+	}
+	return u.Scheme == "https" || u.Scheme == "http"
 }
 
 // apiAppCreate registers a platform product: an OAuth client owned by the
@@ -481,11 +492,17 @@ func (a *api) apiAppCreate(w http.ResponseWriter, r *http.Request, actor *users.
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
+	if req.BaseURL != "" && !validBaseURL(req.BaseURL) {
+		writeJSONError(w, http.StatusBadRequest, "base_url must be an absolute http(s) URL")
+		return
+	}
 	client := &admin.Client{
 		ClientID:     clientID,
 		ClientSecret: secret,
 		Name:         req.Name,
 		RedirectURIs: firstNonEmptySlice(req.RedirectURIs, []string{}),
+		BaseURL:      req.BaseURL,
 	}
 	if err := a.Admin.CreateClient(client); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
@@ -521,10 +538,10 @@ func (a *api) apiAppDetail(w http.ResponseWriter, r *http.Request, actor *users.
 }
 
 type updateAppRequest struct {
-	Name            string   `json:"name"`
-	RedirectURIs    []string `json:"redirect_uris"`
-	IsActive        bool     `json:"is_active"`
-	ModuleNamespace string   `json:"module_namespace"`
+	Name         string   `json:"name"`
+	RedirectURIs []string `json:"redirect_uris"`
+	IsActive     bool     `json:"is_active"`
+	BaseURL      string   `json:"base_url"`
 }
 
 func (a *api) apiAppUpdate(w http.ResponseWriter, r *http.Request, actor *users.User) {
@@ -542,18 +559,20 @@ func (a *api) apiAppUpdate(w http.ResponseWriter, r *http.Request, actor *users.
 		writeJSONError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	req.ModuleNamespace = strings.ToLower(strings.TrimSpace(req.ModuleNamespace))
-	if req.ModuleNamespace != "" && !validNamespaceKey(req.ModuleNamespace) {
-		writeJSONError(w, http.StatusBadRequest, "module_namespace must be lowercase letters, digits, _ or -")
+	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
+	if req.BaseURL == "" {
+		req.BaseURL = client.BaseURL
+	} else if !validBaseURL(req.BaseURL) {
+		writeJSONError(w, http.StatusBadRequest, "base_url must be an absolute http(s) URL")
 		return
 	}
-	if err := a.Admin.UpdateClient(client.ID, req.Name, firstNonEmptySlice(req.RedirectURIs, client.RedirectURIs), req.IsActive, req.ModuleNamespace); err != nil {
+	if err := a.Admin.UpdateClient(client.ID, req.Name, firstNonEmptySlice(req.RedirectURIs, client.RedirectURIs), req.IsActive, req.BaseURL); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	a.auditAPI(r, actor, "app.updated", "", map[string]interface{}{
 		"client_id": client.ClientID, "redirect_uris": req.RedirectURIs, "active": req.IsActive,
-		"module_namespace": req.ModuleNamespace,
+		"base_url": req.BaseURL,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
@@ -579,271 +598,6 @@ func (a *api) apiAppRotate(w http.ResponseWriter, r *http.Request, actor *users.
 		"client_id":          client.ClientID,
 		"client_secret_once": secret,
 	})
-}
-
-// ── Product module catalog ──
-
-func (a *api) apiModuleList(w http.ResponseWriter, r *http.Request, actor *users.User) {
-	modules, err := a.Admin.ListModules()
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"modules": modules})
-}
-
-type createModuleRequest struct {
-	Namespace string `json:"namespace"`
-	Key       string `json:"key"`
-	Label     string `json:"label"`
-	Hint      string `json:"hint"`
-	SortOrder int    `json:"sort_order"`
-}
-
-func (a *api) apiModuleCreate(w http.ResponseWriter, r *http.Request, actor *users.User) {
-	var req createModuleRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	req.Namespace = strings.ToLower(strings.TrimSpace(req.Namespace))
-	req.Key = strings.ToLower(strings.TrimSpace(req.Key))
-	req.Label = strings.TrimSpace(req.Label)
-	if req.Namespace == "" || req.Key == "" || req.Label == "" {
-		writeJSONError(w, http.StatusBadRequest, "namespace, key and label are required")
-		return
-	}
-	if !validNamespaceKey(req.Namespace) || !validNamespaceKey(req.Key) {
-		writeJSONError(w, http.StatusBadRequest, "namespace and key must be lowercase letters, digits, '_' or '-'")
-		return
-	}
-	module := &admin.Module{
-		Namespace: req.Namespace,
-		Key:       req.Key,
-		Label:     req.Label,
-		Hint:      strings.TrimSpace(req.Hint),
-		SortOrder: req.SortOrder,
-	}
-	if err := a.Admin.CreateModule(module); err != nil {
-		if admin.IsUniqueViolation(err) {
-			writeJSONError(w, http.StatusConflict,
-				fmt.Sprintf("module %s:%s already exists", req.Namespace, req.Key))
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.auditAPI(r, actor, "module.created", "", map[string]interface{}{
-		"namespace": module.Namespace, "key": module.Key, "label": module.Label,
-	})
-	writeJSON(w, http.StatusCreated, map[string]interface{}{"module": module})
-}
-
-type updateModuleRequest struct {
-	Label     string `json:"label"`
-	Hint      string `json:"hint"`
-	SortOrder int    `json:"sort_order"`
-}
-
-func (a *api) apiModuleUpdate(w http.ResponseWriter, r *http.Request, actor *users.User) {
-	var req updateModuleRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	req.Label = strings.TrimSpace(req.Label)
-	if req.Label == "" {
-		writeJSONError(w, http.StatusBadRequest, "label is required")
-		return
-	}
-	id := r.PathValue("id")
-	if err := a.Admin.UpdateModule(id, req.Label, strings.TrimSpace(req.Hint), req.SortOrder); err != nil {
-		writeJSONError(w, mapRepoStatus(err), err.Error())
-		return
-	}
-	a.auditAPI(r, actor, "module.updated", "", map[string]interface{}{
-		"id": id, "label": req.Label,
-	})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
-}
-
-func (a *api) apiModuleRemove(w http.ResponseWriter, r *http.Request, actor *users.User) {
-	id := r.PathValue("id")
-	modules, _ := a.Admin.ListModules()
-	var removed *admin.Module
-	for i := range modules {
-		if modules[i].ID == id {
-			removed = &modules[i]
-			break
-		}
-	}
-	if err := a.Admin.DeleteModule(id); err != nil {
-		writeJSONError(w, mapRepoStatus(err), err.Error())
-		return
-	}
-	details := map[string]interface{}{"id": id}
-	if removed != nil {
-		details["namespace"] = removed.Namespace
-		details["key"] = removed.Key
-	}
-	a.auditAPI(r, actor, "module.removed", "", details)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
-}
-
-// ── Sidemenu registry ──
-
-type sidemenuItemRequest struct {
-	Label               string `json:"label"`
-	Icon                string `json:"icon"`
-	Href                string `json:"href"`
-	Section             string `json:"section"`
-	RequiredEntitlement string `json:"required_entitlement"`
-	SortOrder           int    `json:"sort_order"`
-	IsActive            *bool  `json:"is_active"`
-}
-
-func (req *sidemenuItemRequest) normalize() error {
-	req.Label = strings.TrimSpace(req.Label)
-	req.Href = strings.TrimSpace(req.Href)
-	req.Section = strings.TrimSpace(req.Section)
-	req.RequiredEntitlement = strings.ToLower(strings.TrimSpace(req.RequiredEntitlement))
-	if req.Label == "" || req.Href == "" {
-		return fmt.Errorf("label and href are required")
-	}
-	if req.RequiredEntitlement != "" && !validEntitlementKey(req.RequiredEntitlement) {
-		return fmt.Errorf("required_entitlement must look like namespace:key")
-	}
-	return nil
-}
-
-func (a *api) apiMenuList(w http.ResponseWriter, r *http.Request, actor *users.User) {
-	client, ok := a.loadAppOr404(w, r)
-	if !ok {
-		return
-	}
-	items, err := a.Admin.ListSidemenuItems(client.ClientID, false)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
-}
-
-func (a *api) apiMenuCreate(w http.ResponseWriter, r *http.Request, actor *users.User) {
-	client, ok := a.loadAppOr404(w, r)
-	if !ok {
-		return
-	}
-	var req sidemenuItemRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := req.normalize(); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	item := &admin.SidemenuItem{
-		ClientID:            client.ClientID,
-		Label:               req.Label,
-		Icon:                strings.TrimSpace(req.Icon),
-		Href:                req.Href,
-		Section:             req.Section,
-		RequiredEntitlement: req.RequiredEntitlement,
-		SortOrder:           req.SortOrder,
-	}
-	if err := a.Admin.CreateSidemenuItem(item); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.auditAPI(r, actor, "menu.created", client.ID, map[string]interface{}{
-		"item_id": item.ID, "label": item.Label, "href": item.Href,
-		"required_entitlement": item.RequiredEntitlement,
-	})
-	writeJSON(w, http.StatusCreated, map[string]interface{}{"item": item})
-}
-
-func (a *api) apiMenuUpdate(w http.ResponseWriter, r *http.Request, actor *users.User) {
-	client, ok := a.loadAppOr404(w, r)
-	if !ok {
-		return
-	}
-	var req sidemenuItemRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := req.normalize(); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	isActive := true
-	if req.IsActive != nil {
-		isActive = *req.IsActive
-	}
-	item := &admin.SidemenuItem{
-		ClientID:            client.ClientID,
-		Label:               req.Label,
-		Icon:                strings.TrimSpace(req.Icon),
-		Href:                req.Href,
-		Section:             req.Section,
-		RequiredEntitlement: req.RequiredEntitlement,
-		SortOrder:           req.SortOrder,
-		IsActive:            isActive,
-	}
-	id := r.PathValue("item_id")
-	if err := a.Admin.UpdateSidemenuItem(id, item); err != nil {
-		writeJSONError(w, mapRepoStatus(err), err.Error())
-		return
-	}
-	a.auditAPI(r, actor, "menu.updated", client.ID, map[string]interface{}{
-		"item_id": id, "label": item.Label, "active": item.IsActive,
-	})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
-}
-
-func (a *api) apiMenuRemove(w http.ResponseWriter, r *http.Request, actor *users.User) {
-	client, ok := a.loadAppOr404(w, r)
-	if !ok {
-		return
-	}
-	id := r.PathValue("item_id")
-	if err := a.Admin.DeleteSidemenuItem(id); err != nil {
-		writeJSONError(w, mapRepoStatus(err), err.Error())
-		return
-	}
-	a.auditAPI(r, actor, "menu.removed", client.ID, map[string]interface{}{"item_id": id})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
-}
-
-// validEntitlementKey checks the namespace:key format of org_entitlements.
-func validEntitlementKey(s string) bool {
-	i := strings.IndexByte(s, ':')
-	if i <= 0 || i == len(s)-1 {
-		return false
-	}
-	return validNamespaceKey(s[:i]) && validNamespaceKey(s[i+1:])
-}
-
-func validNamespaceKey(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, c := range s {
-		switch {
-		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '_', c == '-':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-func mapRepoStatus(err error) int {
-	if err == admin.ErrNotFound {
-		return http.StatusNotFound
-	}
-	return http.StatusInternalServerError
 }
 
 // ── People ──
@@ -916,10 +670,6 @@ func firstNonEmptySlice(a, b []string) []string {
 		return a
 	}
 	return b
-}
-
-func uuidNewString() string {
-	return uuid.New().String()
 }
 
 func clientIP(r *http.Request) string {

@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	ErrUserNotFound      = errors.New("user not found")
+	ErrUserNotFound       = errors.New("user not found")
 	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUserInactive      = errors.New("user account is inactive")
+	ErrUserInactive       = errors.New("user account is inactive")
 )
 
 type User struct {
@@ -104,17 +104,6 @@ func (r *Repository) Create(user *User) error {
 	`, user.ID, user.Email, user.EmailVerified, user.PasswordHash,
 		user.Name, user.GivenName, user.FamilyName, user.Picture,
 		user.PreferredUsername, user.IsActive, user.IsPlatformAdmin)
-	return err
-}
-
-func (r *Repository) Update(user *User) error {
-	_, err := r.db.Exec(`
-		UPDATE users
-		SET email = $2, email_verified = $3, name = $4, given_name = $5, family_name = $6, picture = $7, preferred_username = $8, is_active = $9, updated_at = NOW()
-		WHERE id = $1
-	`, user.ID, user.Email, user.EmailVerified, user.Name,
-		user.GivenName, user.FamilyName, user.Picture,
-		user.PreferredUsername, user.IsActive)
 	return err
 }
 
@@ -246,10 +235,4 @@ func (r *Repository) SetActive(userID string, active bool) error {
 		UPDATE users SET is_active = $2, updated_at = NOW() WHERE id = $1
 	`, userID, active)
 	return err
-}
-
-func (r *Repository) CountAll() (int, error) {
-	var count int
-	err := r.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
-	return count, err
 }
