@@ -465,10 +465,10 @@ type createAppRequest struct {
 	BaseURL      string   `json:"base_url"`
 }
 
-// validBaseURL accepts http(s) URLs without query strings or fragments.
-func validBaseURL(s string) bool {
+// validateUrl accepts http(s) URLs without query strings or fragments.
+func validateUrl(s string) bool {
 	u, err := url.Parse(s)
-	if err != nil || u.Host == "" || u.Query() != nil || u.Fragment != "" {
+	if err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
 		return false
 	}
 	return u.Scheme == "https" || u.Scheme == "http"
@@ -493,15 +493,30 @@ func (a *api) apiAppCreate(w http.ResponseWriter, r *http.Request, actor *users.
 		return
 	}
 	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
-	if req.BaseURL != "" && !validBaseURL(req.BaseURL) {
+	if req.BaseURL == "" {
+		writeJSONError(w, http.StatusBadRequest, "base_url is required")
+		return
+	}
+	if !validateUrl(req.BaseURL) {
 		writeJSONError(w, http.StatusBadRequest, "base_url must be an absolute http(s) URL")
 		return
 	}
+
+	uris := make([]string, 0, len(req.RedirectURIs))
+	for _, u := range req.RedirectURIs {
+		u = strings.TrimRight(strings.TrimSpace(u), "/")
+		if !validateUrl(u) {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("redirect_uri %q must be an absolute http(s) URL", u))
+			return
+		}
+		uris = append(uris, u)
+	}
+
 	client := &admin.Client{
 		ClientID:     clientID,
 		ClientSecret: secret,
 		Name:         req.Name,
-		RedirectURIs: firstNonEmptySlice(req.RedirectURIs, []string{}),
+		RedirectURIs: uris,
 		BaseURL:      req.BaseURL,
 	}
 	if err := a.Admin.CreateClient(client); err != nil {
@@ -562,11 +577,23 @@ func (a *api) apiAppUpdate(w http.ResponseWriter, r *http.Request, actor *users.
 	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
 	if req.BaseURL == "" {
 		req.BaseURL = client.BaseURL
-	} else if !validBaseURL(req.BaseURL) {
+	} else if !validateUrl(req.BaseURL) {
 		writeJSONError(w, http.StatusBadRequest, "base_url must be an absolute http(s) URL")
 		return
 	}
-	if err := a.Admin.UpdateClient(client.ID, req.Name, firstNonEmptySlice(req.RedirectURIs, client.RedirectURIs), req.IsActive, req.BaseURL); err != nil {
+	uris := client.RedirectURIs
+	if req.RedirectURIs != nil {
+		uris = make([]string, 0, len(req.RedirectURIs))
+		for _, u := range req.RedirectURIs {
+			u = strings.TrimRight(strings.TrimSpace(u), "/")
+			if !validateUrl(u) {
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("redirect_uri %q must be an absolute http(s) URL", u))
+				return
+			}
+			uris = append(uris, u)
+		}
+	}
+	if err := a.Admin.UpdateClient(client.ID, req.Name, uris, req.IsActive, req.BaseURL); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -663,13 +690,6 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-func firstNonEmptySlice(a, b []string) []string {
-	if len(a) > 0 {
-		return a
-	}
-	return b
 }
 
 func clientIP(r *http.Request) string {

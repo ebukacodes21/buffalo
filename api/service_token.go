@@ -63,7 +63,7 @@ func (a *api) apiServiceToken(w http.ResponseWriter, r *http.Request, actor *use
 		return
 	}
 
-	a.auditAPI(r, actor, "service_token.issued", client.ID, map[string]interface{}{
+	a.auditAPI(r, actor, "service_token.issued", "", map[string]interface{}{
 		"client_id": client.ClientID, "scope": "product:read",
 	})
 	writeJSON(w, http.StatusOK, map[string]interface{}{

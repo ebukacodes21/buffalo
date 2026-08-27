@@ -66,3 +66,5 @@ func main() {
 
 	fmt.Printf("api stopped: %s", api.Start(&http.Server{Addr: ":8089"}, privateKey, api.Config{Url: issuerURL()}, database))
 }
+
+// $argon2id$v=19$m=65536,t=1,p=4$m2RgRfF7obVzYlVNYhmt+w$O7ELcHpgZulFJAPCIcFY6DbuhrCoHSyif+GVdkNnpQ4
