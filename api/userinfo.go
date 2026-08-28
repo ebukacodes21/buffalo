@@ -10,13 +10,14 @@ import (
 )
 
 func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	authHeader := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if authHeader == "" {
 		apiError(w, http.StatusUnauthorized, fmt.Errorf("authorization header missing"))
 		return
 	}
 
-	claims := &jwt.RegisteredClaims{}
+	claims := &jwt.MapClaims{}
 	_, err := jwt.ParseWithClaims(authHeader, claims, func(t *jwt.Token) (interface{}, error) {
 		privateKey, err := jwt.ParseRSAPrivateKeyFromPEM(a.PrivateKey)
 		if err != nil {
@@ -30,7 +31,7 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	found := false
-	for _, aud := range claims.Audience {
+	for _, aud := range (*claims)["aud"].([]interface{}) {
 		if aud == fmt.Sprintf("%s/userinfo", a.Config.Url) {
 			found = true
 		}
@@ -40,21 +41,47 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := a.Users.GetByID(claims.Subject)
+	sub, _ := (*claims)["sub"].(string)
+	subType, _ := (*claims)["sub_type"].(string)
+
+	if subType == "member" {
+		m, err := a.Svc.GetMemberByID(ctx, sub)
+		if err != nil {
+			apiError(w, http.StatusNotFound, fmt.Errorf("member not found"))
+			return
+		}
+		org, err := a.Svc.ListMembershipForMember(ctx, sub)
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, fmt.Errorf("organizations lookup error"))
+			return
+		}
+		out, err := json.Marshal(map[string]any{
+			"sub":                m.ID,
+			"org_id":             m.OrgID,
+			"role":               m.Role,
+			"email":              m.Email,
+			"email_verified":     m.EmailVerified,
+			"name":               m.Name,
+			"given_name":         m.GivenName,
+			"family_name":        m.FamilyName,
+			"preferred_username": m.PreferredUsername,
+			"picture":            m.Picture,
+			"is_platform_admin":  false,
+			"roles":              rolesForMember(m.Role),
+			"organization":       org,
+		})
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, fmt.Errorf("userinfo marshalling error"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(out)
+		return
+	}
+
+	user, err := a.Svc.GetUserByID(ctx, sub)
 	if err != nil {
 		apiError(w, http.StatusNotFound, fmt.Errorf("user not found"))
-		return
-	}
-
-	roles, err := a.Users.GetOrgRoles(claims.Subject)
-	if err != nil {
-		apiError(w, http.StatusInternalServerError, fmt.Errorf("roles lookup error"))
-		return
-	}
-
-	orgs, err := a.Admin.ListMembershipsForUser(claims.Subject)
-	if err != nil {
-		apiError(w, http.StatusInternalServerError, fmt.Errorf("organizations lookup error"))
 		return
 	}
 
@@ -68,8 +95,7 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 		"preferred_username": user.PreferredUsername,
 		"picture":            user.Picture,
 		"is_platform_admin":  user.IsPlatformAdmin,
-		"roles":              roles,
-		"organizations":      orgs,
+		"roles":              []string{},
 	})
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, fmt.Errorf("userinfo marshalling error"))
@@ -78,4 +104,11 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(out)
+}
+
+func rolesForMember(role string) []string {
+	if role == "" {
+		return []string{}
+	}
+	return []string{role}
 }

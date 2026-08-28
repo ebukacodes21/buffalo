@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/ebukacodes21/buffalo/oidc"
-
+	"github.com/ebukacodes21/buffalo/service"
 	"github.com/golang-jwt/jwt/v4"
 )
 
@@ -20,8 +19,8 @@ func (a *api) jwks(w http.ResponseWriter, r *http.Request) {
 
 	pubKey := pk.PublicKey
 
-	jwks := oidc.Jwks{
-		Keys: []oidc.JwksKey{
+	jwks := service.Jwks{
+		Keys: []service.JwksKey{
 			{
 				Kid: "buffalo_v1",
 				Alg: "RS256",

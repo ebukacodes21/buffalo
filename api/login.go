@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ebukacodes21/buffalo/service"
 	"github.com/ebukacodes21/buffalo/tooling"
-	"github.com/ebukacodes21/buffalo/users"
 )
 
 //go:embed templates/*.html
@@ -28,6 +28,7 @@ func parseTemplate(name string) (*template.Template, error) {
 }
 
 func (a *api) login(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	if r.Method == http.MethodPost {
 		err := r.ParseForm()
 		if err != nil {
@@ -42,19 +43,8 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		login := r.PostForm.Get("login")
+		login := strings.ToLower(strings.TrimSpace(r.PostForm.Get("login")))
 		password := r.PostForm.Get("password")
-
-		user, err := a.Users.GetByEmail(login)
-		if err != nil || !users.VerifyPassword(user.PasswordHash, password) {
-			a.loginError(w, r, sessID, "Invalid email or password.")
-			return
-		}
-
-		if !user.IsActive {
-			a.loginError(w, r, sessID, "This account is inactive. Please contact support.")
-			return
-		}
 
 		code, err := tooling.GetRandomString(128)
 		if err != nil {
@@ -64,26 +54,31 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 		}
 
 		payload.CodeIssuedAt = time.Now()
-		payload.User = users.User{
-			Sub:               user.ID,
-			ID:                user.ID,
-			Name:              user.Name,
-			GivenName:         user.GivenName,
-			FamilyName:        user.FamilyName,
-			PreferredUsername: user.PreferredUsername,
-			Email:             user.Email,
-			Picture:           user.Picture,
+
+		invalid := func() {
+			a.loginError(w, r, sessID, "Invalid email or password.")
 		}
-		if roles, err := a.Users.GetOrgRoles(user.ID); err != nil {
-			log.Printf("error loading roles for %s: %s", user.ID, err)
-		} else {
-			payload.User.Roles = roles
+
+		rec, err := a.Svc.LookupEmail(ctx, login)
+		if err != nil || !tooling.VerifyPassword(rec.Password, password) {
+			invalid()
+			return
 		}
-		if orgs, err := a.Admin.ListMembershipsForUser(user.ID); err != nil {
-			log.Printf("error loading org memberships for %s: %s", user.ID, err)
-		} else {
-			payload.Organizations = orgs
+		if !rec.IsActive {
+			a.loginError(w, r, sessID, "This account is inactive. Please contact support.")
+			return
 		}
+
+		payload.SubjectType = rec.SubjectType
+		payload.Record = &service.AccountRecord{
+			Sub:      rec.ID,
+			ID:       rec.ID,
+			Name:     rec.Name,
+			Email:    rec.Email,
+			Role:     rec.Role,
+			IsActive: rec.IsActive,
+		}
+
 		a.CodePool[code] = payload
 
 		if r.PostForm.Get("remember") == "on" {
@@ -93,7 +88,7 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 				a.loginError(w, r, sessID, "Something went wrong. Please try again.")
 				return
 			}
-			if err := a.Users.CreateRefreshToken(refreshToken, payload.ClientID, user.ID, payload.Scope, time.Now().Add(30*24*time.Hour)); err != nil {
+			if err := a.Svc.CreateRefreshToken(refreshToken, payload.ClientID, payload.SubjectType, payload.SubjectID(), payload.Scope, time.Now().Add(30*24*time.Hour)); err != nil {
 				log.Printf("error storing refresh token: %s", err)
 				a.loginError(w, r, sessID, "Something went wrong. Please try again.")
 				return
@@ -148,14 +143,15 @@ func (a *api) renderLogin(w http.ResponseWriter, r *http.Request, sessID, errMsg
 const resetLinkSentMsg = "If an account exists with that email, you will receive a password reset link."
 
 func (a *api) forgotPassword(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	if r.Method == http.MethodPost {
 		if err := r.ParseForm(); err != nil {
 			a.renderForgotPassword(w, r, "", "Something went wrong. Please try again.")
 			return
 		}
 
-		email := r.PostForm.Get("email")
-		user, err := a.Users.GetByEmail(email)
+		email := strings.ToLower(strings.TrimSpace(r.PostForm.Get("email")))
+		obj, err := a.Svc.LookupEmail(ctx, email)
 		if err != nil {
 			a.forgotPasswordResponse(w, r, resetLinkSentMsg, "")
 			return
@@ -168,13 +164,13 @@ func (a *api) forgotPassword(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := a.Users.CreatePasswordReset(user.ID, token, time.Now().Add(1*time.Hour)); err != nil {
+		if err := a.Svc.CreatePasswordReset(ctx, obj.ID, token, time.Now().Add(1*time.Hour)); err != nil {
 			log.Printf("error storing reset token: %s", err)
 			a.forgotPasswordResponse(w, r, "", "Something went wrong. Please try again.")
 			return
 		}
 
-		log.Printf("PASSWORD RESET for %s: %s/reset-password?token=%s", user.Email, a.Config.Url, token)
+		log.Printf("PASSWORD RESET for %s: %s/reset-password?token=%s", email, a.Config.Url, token)
 
 		a.forgotPasswordResponse(w, r, resetLinkSentMsg, "")
 		return
@@ -183,8 +179,8 @@ func (a *api) forgotPassword(w http.ResponseWriter, r *http.Request) {
 	a.renderForgotPassword(w, r, "", "")
 }
 
-// forgotPasswordResponse answers the fetch() call from the page with plain
-// text, or re-renders the full page when the form was submitted without JS.
+// // forgotPasswordResponse answers the fetch() call from the page with plain
+// // text, or re-renders the full page when the form was submitted without JS.
 func (a *api) forgotPasswordResponse(w http.ResponseWriter, r *http.Request, successMsg, errMsg string) {
 	if strings.Contains(r.Header.Get("Accept"), "text/html") {
 		a.renderForgotPassword(w, r, successMsg, errMsg)
@@ -207,6 +203,7 @@ func (a *api) renderForgotPassword(w http.ResponseWriter, r *http.Request, succe
 }
 
 func (a *api) resetPassword(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	token := r.URL.Query().Get("token")
 	if token == "" && r.Method == http.MethodPost {
 		if err := r.ParseForm(); err != nil {
@@ -240,26 +237,26 @@ func (a *api) resetPassword(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		userID, err := a.Users.GetPasswordReset(token)
+		memberID, err := a.Svc.GetPasswordReset(ctx, token)
 		if err != nil {
 			fail("Invalid or expired reset link. Please request a new one.")
 			return
 		}
 
-		hash, err := users.HashPassword(password)
+		hash, err := tooling.HashPassword(password)
 		if err != nil {
 			log.Printf("error hashing password: %s", err)
 			fail("Something went wrong. Please try again.")
 			return
 		}
 
-		if err := a.Users.UpdatePasswordHash(userID, hash); err != nil {
+		if err := a.Svc.UpdatePasswordHash(ctx, memberID, hash); err != nil {
 			log.Printf("error updating password: %s", err)
 			fail("Something went wrong. Please try again.")
 			return
 		}
 
-		if err := a.Users.MarkPasswordResetUsed(token); err != nil {
+		if err := a.Svc.MarkPasswordResetUsed(ctx, token); err != nil {
 			log.Printf("warning: failed to mark reset token used: %v", err)
 		}
 
@@ -270,7 +267,7 @@ func (a *api) resetPassword(w http.ResponseWriter, r *http.Request) {
 	errMsg := ""
 	if kind, msg := popFlash(w, r); kind == "error" {
 		errMsg = msg
-	} else if _, err := a.Users.GetPasswordReset(token); err != nil {
+	} else if _, err := a.Svc.GetPasswordReset(ctx, token); err != nil {
 		errMsg = "Invalid or expired reset link. Please request a new one."
 	}
 	renderTemplate(w, "reset-password.html", r, map[string]interface{}{

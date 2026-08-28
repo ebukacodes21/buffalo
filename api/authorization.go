@@ -58,7 +58,7 @@ func (a *api) authorization(w http.ResponseWriter, r *http.Request) {
 
 	// OAuth clients live in the database (managed via the Arkad console).
 	appConfig := AppConfig{}
-	client, err := a.Admin.GetActiveClientByClientID(clientID)
+	client, err := a.Svc.GetActiveClientByClientID(r.Context(), clientID)
 	if err != nil {
 		log.Printf("client lookup %q failed: %v", clientID, err)
 	}
@@ -67,7 +67,7 @@ func (a *api) authorization(w http.ResponseWriter, r *http.Request) {
 			ClientID:     client.ClientID,
 			ClientSecret: client.ClientSecret,
 			Issuer:       a.Config.Url,
-			RedirectURIs: client.RedirectURIs,
+			RedirectURIs: client.RedirectUris,
 		}
 	}
 

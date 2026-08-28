@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ebukacodes21/buffalo/service"
 	"github.com/ebukacodes21/buffalo/tooling"
-	"github.com/ebukacodes21/buffalo/users"
 	"github.com/golang-jwt/jwt/v4"
 )
 
@@ -23,7 +23,7 @@ const serviceTokenTTL = 10 * time.Minute
 // client_id and scope "product:read". No shared static secrets live on either
 // side, tokens can't be replayed after expiry, and revocation is as simple as
 // deactivating the client.
-func (a *api) apiServiceToken(w http.ResponseWriter, r *http.Request, actor *users.User) {
+func (a *api) apiServiceToken(w http.ResponseWriter, r *http.Request, actor *service.User) {
 	client, ok := a.loadAppOr404(w, r)
 	if !ok {
 		return

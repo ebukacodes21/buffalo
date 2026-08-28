@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/ebukacodes21/buffalo/oidc"
+	"github.com/ebukacodes21/buffalo/service"
 )
 
 func (a *api) discovery(w http.ResponseWriter, _ *http.Request) {
-	discovery := oidc.Discovery{
+	discovery := service.Discovery{
 		Issuer:                            a.Config.Url,
 		AuthorizationEndpoint:             fmt.Sprintf("%s/authorization", a.Config.Url),
 		TokenEndpoint:                     fmt.Sprintf("%s/token", a.Config.Url),

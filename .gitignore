@@ -1,3 +1,4 @@
 enckey.pem
 compose.yml
 .env
+sqlc.yaml

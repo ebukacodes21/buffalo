@@ -1,4 +1,4 @@
-package users
+package tooling
 
 import (
 	"crypto/rand"
@@ -31,6 +31,15 @@ func HashPassword(password string) (string, error) {
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", 0x13, argon2Memory, argon2Time, argon2Threads, encodedSalt, encodedSecret), nil
 }
 
+func VerifyPassword(hash, password string) bool {
+	salt, secret, err := decodeArgon2Hash(hash)
+	if err != nil {
+		return false
+	}
+	computed := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
+	return constantTimeEqual(computed, secret)
+}
+
 func decodeArgon2Hash(hash string) (salt, secret []byte, err error) {
 	parts := strings.Split(hash, "$")
 	if len(parts) != 6 {
@@ -53,4 +62,16 @@ func decodeArgon2Hash(hash string) (salt, secret []byte, err error) {
 	}
 
 	return salt, secret, nil
+}
+
+func constantTimeEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ebukacodes21/buffalo/api"
 	"github.com/ebukacodes21/buffalo/db"
+	"github.com/ebukacodes21/buffalo/service"
 	"github.com/ebukacodes21/buffalo/tooling"
 
 	"github.com/joho/godotenv"
@@ -64,7 +65,7 @@ func main() {
 	}
 	defer database.Close()
 
-	fmt.Printf("api stopped: %s", api.Start(&http.Server{Addr: ":8089"}, privateKey, api.Config{Url: issuerURL()}, database))
-}
+	svc := service.NewBuffalo(database)
 
-// $argon2id$v=19$m=65536,t=1,p=4$m2RgRfF7obVzYlVNYhmt+w$O7ELcHpgZulFJAPCIcFY6DbuhrCoHSyif+GVdkNnpQ4
+	fmt.Printf("api stopped: %s", api.Start(&http.Server{Addr: ":8089"}, privateKey, api.Config{Url: issuerURL()}, svc))
+}

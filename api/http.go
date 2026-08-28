@@ -1,14 +1,12 @@
 package api
 
 import (
-	"database/sql"
 	"embed"
 	"fmt"
 	"io/fs"
 	"net/http"
 
-	"github.com/ebukacodes21/buffalo/admin"
-	"github.com/ebukacodes21/buffalo/users"
+	"github.com/ebukacodes21/buffalo/service"
 )
 
 //go:embed static
@@ -17,21 +15,19 @@ var staticFs embed.FS
 type api struct {
 	PrivateKey []byte
 	Config     Config
-	Users      *users.Repository
-	Admin      *admin.Repository
 	// pool to store all session payloads on the server
 	SessionPool map[string]Payload
 	CodePool    map[string]Payload
+	Svc         *service.Buffalo
 }
 
-func newApi(privateKey []byte, config Config, db *sql.DB) *api {
+func newApi(privateKey []byte, config Config, svc *service.Buffalo) *api {
 	return &api{
 		PrivateKey:  privateKey,
 		Config:      config,
-		Users:       users.NewRepository(db),
-		Admin:       admin.NewRepository(db),
 		SessionPool: make(map[string]Payload),
 		CodePool:    make(map[string]Payload),
+		Svc:         svc,
 	}
 }
 
@@ -43,8 +39,8 @@ func staticHandler() http.Handler {
 	return http.StripPrefix("/static/", http.FileServer(http.FS(sub)))
 }
 
-func Start(httpServer *http.Server, privateKey []byte, config Config, db *sql.DB) error {
-	a := newApi(privateKey, config, db)
+func Start(httpServer *http.Server, privateKey []byte, config Config, svc *service.Buffalo) error {
+	a := newApi(privateKey, config, svc)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", a.index)

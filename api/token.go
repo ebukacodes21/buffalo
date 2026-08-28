@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -9,10 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ebukacodes21/buffalo/admin"
-	"github.com/ebukacodes21/buffalo/oidc"
+	"github.com/ebukacodes21/buffalo/service"
 	"github.com/ebukacodes21/buffalo/tooling"
-	"github.com/ebukacodes21/buffalo/users"
 
 	"github.com/golang-jwt/jwt/v4"
 )
@@ -81,7 +80,7 @@ func (a *api) tokenFromCode(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusInternalServerError, fmt.Errorf("unable to generate refresh token"))
 		return
 	}
-	if err := a.Users.CreateRefreshToken(refreshToken, payload.ClientID, payload.User.ID, payload.Scope, time.Now().Add(refreshTokenTTL)); err != nil {
+	if err := a.Svc.CreateRefreshToken(refreshToken, payload.ClientID, payload.SubjectType, payload.SubjectID(), payload.Scope, time.Now().Add(refreshTokenTTL)); err != nil {
 		apiError(w, http.StatusInternalServerError, fmt.Errorf("unable to store refresh token"))
 		return
 	}
@@ -102,7 +101,7 @@ func (a *api) tokenFromRefresh(w http.ResponseWriter, r *http.Request) {
 	presented := r.PostForm.Get("refresh_token")
 	clientID := r.PostForm.Get("client_id")
 
-	client, userID, scope, err := a.Users.GetRefreshToken(presented)
+	client, subjectType, subjectID, scope, err := a.Svc.GetRefreshToken(presented)
 	if err != nil {
 		apiError(w, http.StatusBadRequest, fmt.Errorf("invalid refresh token"))
 		return
@@ -112,28 +111,14 @@ func (a *api) tokenFromRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := a.Users.GetByID(userID)
-	if err != nil || !user.IsActive {
+	payload, err := a.resolvePayload(r.Context(), subjectType, subjectID, client, scope)
+	if err != nil {
 		apiError(w, http.StatusBadRequest, fmt.Errorf("invalid refresh token"))
 		return
 	}
-
-	payload := Payload{
-		ClientID:     client,
-		Scope:        scope,
-		CodeIssuedAt: time.Now(),
-		User: users.User{
-			Sub:   user.ID,
-			ID:    user.ID,
-			Name:  user.Name,
-			Email: user.Email,
-		},
-	}
-	if roles, err := a.Users.GetOrgRoles(user.ID); err == nil {
-		payload.User.Roles = roles
-	}
-	if orgs, err := a.Admin.ListMembershipsForUser(user.ID); err == nil {
-		payload.Organizations = orgs
+	if !payload.IsActive() {
+		apiError(w, http.StatusBadRequest, fmt.Errorf("invalid refresh token"))
+		return
 	}
 
 	replacement, err := tooling.GetRandomString(64)
@@ -141,11 +126,11 @@ func (a *api) tokenFromRefresh(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusInternalServerError, fmt.Errorf("unable to generate refresh token"))
 		return
 	}
-	if err := a.Users.RevokeRefreshToken(presented); err != nil {
+	if err := a.Svc.RevokeRefreshToken(presented); err != nil {
 		apiError(w, http.StatusInternalServerError, fmt.Errorf("unable to revoke refresh token"))
 		return
 	}
-	if err := a.Users.CreateRefreshToken(replacement, client, userID, scope, time.Now().Add(refreshTokenTTL)); err != nil {
+	if err := a.Svc.CreateRefreshToken(replacement, client, subjectType, subjectID, scope, time.Now().Add(refreshTokenTTL)); err != nil {
 		apiError(w, http.StatusInternalServerError, fmt.Errorf("unable to store refresh token"))
 		return
 	}
@@ -158,19 +143,65 @@ func (a *api) tokenFromRefresh(w http.ResponseWriter, r *http.Request) {
 	w.Write(out)
 }
 
-// issueTokens signs the id + access token pair for a resolved session.
-func (a *api) issueTokens(payload Payload, refreshToken string) oidc.Token {
-	pk, err := jwt.ParseRSAPrivateKeyFromPEM(a.PrivateKey)
-	if err != nil {
-		return oidc.Token{}
+// resolvePayload reconstructs a session Payload for a principal given its
+// subject type and id. Members additionally get their org memberships and
+// roles loaded for the token claims.
+func (a *api) resolvePayload(ctx context.Context, subjectType, subjectID, clientID, scope string) (Payload, error) {
+	payload := Payload{
+		ClientID:     clientID,
+		Scope:        scope,
+		SubjectType:  subjectType,
+		CodeIssuedAt: time.Now(),
+	}
+	if subjectType == "member" {
+		m, err := a.Svc.GetMemberByID(ctx, subjectID)
+		if err != nil {
+			return Payload{}, err
+		}
+		payload.Record = &service.AccountRecord{
+			Sub:      m.ID,
+			ID:       m.ID,
+			Email:    m.Email,
+			Name:     m.Name,
+			Role:     m.Role,
+			IsActive: m.IsActive,
+		}
+		if org, err := a.Svc.ListMembershipForMember(ctx, m.ID); err == nil {
+			payload.Organization = org
+		}
+		return payload, nil
 	}
 
+	u, err := a.Svc.GetUserByID(ctx, subjectID)
+	if err != nil {
+		return Payload{}, err
+	}
+	payload.Record = &service.AccountRecord{
+		Sub:      u.ID,
+		ID:       u.ID,
+		Name:     u.Name,
+		Email:    u.Email,
+		Role:     "platform",
+		IsActive: u.IsActive,
+	}
+	return payload, nil
+}
+
+// issueTokens signs the id + access token pair for a resolved session.
+func (a *api) issueTokens(payload Payload, refreshToken string) service.Token {
+	pk, err := jwt.ParseRSAPrivateKeyFromPEM(a.PrivateKey)
+	if err != nil {
+		return service.Token{}
+	}
+
+	sub := payload.SubjectID()
+
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"sub":   payload.User.Sub,
+		"sub":   sub,
 		"iss":   a.Config.Url,
 		"aud":   payload.ClientID,
-		"email": payload.User.Email,
-		"name":  payload.User.Name,
+		"email": payload.SubjectEmail(),
+		"name":  payload.SubjectName(),
 		"exp":   time.Now().Add(1 * time.Hour).Unix(),
 		"nbf":   time.Now().Unix(),
 		"iat":   time.Now().Unix(),
@@ -178,32 +209,37 @@ func (a *api) issueTokens(payload Payload, refreshToken string) oidc.Token {
 	token.Header["kid"] = "buffalo_v1"
 	sigIdToken, err := token.SignedString(pk)
 	if err != nil {
-		return oidc.Token{}
+		return service.Token{}
 	}
 
-	if payload.Organizations == nil {
-		payload.Organizations = []admin.OrgMembership{}
+	roles := payload.SubjectRoles()
+	if roles == nil {
+		roles = []string{}
+	}
+	if payload.Organization == nil {
+		payload.Organization = &service.Organization{}
 	}
 
 	token = jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"sub":           payload.User.Sub,
-		"iss":           a.Config.Url,
-		"aud":           []string{fmt.Sprintf("%s/userinfo", a.Config.Url)},
-		"email":         payload.User.Email,
-		"roles":         payload.User.Roles,
-		"organizations": payload.Organizations,
-		"name":          payload.User.Name,
-		"exp":           time.Now().Add(1 * time.Hour).Unix(),
-		"nbf":           time.Now().Unix(),
-		"iat":           time.Now().Unix(),
+		"sub":          sub,
+		"iss":          a.Config.Url,
+		"aud":          []string{fmt.Sprintf("%s/userinfo", a.Config.Url)},
+		"email":        payload.SubjectEmail(),
+		"roles":        roles,
+		"organization": payload.Organization,
+		"name":         payload.SubjectName(),
+		"sub_type":     payload.SubjectType,
+		"exp":          time.Now().Add(1 * time.Hour).Unix(),
+		"nbf":          time.Now().Unix(),
+		"iat":          time.Now().Unix(),
 	})
 	token.Header["kid"] = "buffalo_v1"
 	sigAccessToken, err := token.SignedString(pk)
 	if err != nil {
-		return oidc.Token{}
+		return service.Token{}
 	}
 
-	return oidc.Token{
+	return service.Token{
 		AccessToken:  sigAccessToken,
 		IDToken:      sigIdToken,
 		TokenType:    "bearer",
