@@ -272,14 +272,14 @@ ORDER BY o.created_at
 `
 
 type ListMembershipsForMemberRow struct {
-	ID             uuid.UUID      `db:"id" json:"id"`
-	Slug           string         `db:"slug" json:"slug"`
-	Name           string         `db:"name" json:"name"`
-	RcNumber       sql.NullString `db:"rc_number" json:"rc_number"`
-	Sector         sql.NullString `db:"sector" json:"sector"`
-	AllocatedSeats int32          `db:"allocated_seats" json:"allocated_seats"`
-	Role           string         `db:"role" json:"role"`
-	Coalesce       interface{}    `db:"coalesce" json:"coalesce"`
+	ID             uuid.UUID   `db:"id" json:"id"`
+	Slug           string      `db:"slug" json:"slug"`
+	Name           string      `db:"name" json:"name"`
+	RcNumber       string      `db:"rc_number" json:"rc_number"`
+	Sector         string      `db:"sector" json:"sector"`
+	AllocatedSeats int32       `db:"allocated_seats" json:"allocated_seats"`
+	Role           string      `db:"role" json:"role"`
+	Coalesce       interface{} `db:"coalesce" json:"coalesce"`
 }
 
 func (q *Queries) ListMembershipsForMember(ctx context.Context, id uuid.UUID) ([]ListMembershipsForMemberRow, error) {

@@ -97,8 +97,8 @@ func (b *Buffalo) ListMembershipForMember(ctx context.Context, memberID string) 
 			Name:           m.Name,
 			Slug:           m.Slug,
 			Status:         "active",
-			RCNumber:       m.RcNumber.String,
-			Sector:         m.Sector.String,
+			RCNumber:       m.RcNumber,
+			Sector:         m.Sector,
 			AllocatedSeats: m.AllocatedSeats,
 		}, nil
 	}

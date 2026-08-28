@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,19 +14,21 @@ import (
 
 const createOrganization = `-- name: CreateOrganization :one
 INSERT INTO organizations (
-    name, slug, product_name, product_id
+    name, slug, product_name, product_id, sector, allocated_seats
 )
 VALUES (
-    $1, $2, $3, $4
+    $1, $2, $3, $4, $5, $6
 )
-RETURNING id, name, slug, logo_url, product_id, product_name, created_at, updated_at, status, rc_number, sector, allocated_seats
+RETURNING id, name, slug, logo_url, product_id, product_name, sector, allocated_seats, rc_number, created_at, updated_at, status
 `
 
 type CreateOrganizationParams struct {
-	Name        string    `db:"name" json:"name"`
-	Slug        string    `db:"slug" json:"slug"`
-	ProductName string    `db:"product_name" json:"product_name"`
-	ProductID   uuid.UUID `db:"product_id" json:"product_id"`
+	Name           string    `db:"name" json:"name"`
+	Slug           string    `db:"slug" json:"slug"`
+	ProductName    string    `db:"product_name" json:"product_name"`
+	ProductID      uuid.UUID `db:"product_id" json:"product_id"`
+	Sector         string    `db:"sector" json:"sector"`
+	AllocatedSeats int32     `db:"allocated_seats" json:"allocated_seats"`
 }
 
 func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error) {
@@ -36,6 +37,8 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.Slug,
 		arg.ProductName,
 		arg.ProductID,
+		arg.Sector,
+		arg.AllocatedSeats,
 	)
 	var i Organization
 	err := row.Scan(
@@ -45,12 +48,12 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		&i.LogoUrl,
 		&i.ProductID,
 		&i.ProductName,
+		&i.Sector,
+		&i.AllocatedSeats,
+		&i.RcNumber,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Status,
-		&i.RcNumber,
-		&i.Sector,
-		&i.AllocatedSeats,
 	)
 	return i, err
 }
@@ -86,7 +89,7 @@ func (q *Queries) DashboardStats(ctx context.Context) (DashboardStatsRow, error)
 }
 
 const getOrgByID = `-- name: GetOrgByID :one
-SELECT id, name, slug, logo_url, product_id, product_name, created_at, updated_at, status, rc_number, sector, allocated_seats FROM organizations 
+SELECT id, name, slug, logo_url, product_id, product_name, sector, allocated_seats, rc_number, created_at, updated_at, status FROM organizations 
 WHERE id = $1 LIMIT 1
 `
 
@@ -100,18 +103,18 @@ func (q *Queries) GetOrgByID(ctx context.Context, id uuid.UUID) (Organization, e
 		&i.LogoUrl,
 		&i.ProductID,
 		&i.ProductName,
+		&i.Sector,
+		&i.AllocatedSeats,
+		&i.RcNumber,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Status,
-		&i.RcNumber,
-		&i.Sector,
-		&i.AllocatedSeats,
 	)
 	return i, err
 }
 
 const listOrgs = `-- name: ListOrgs :many
-SELECT o.id, o.name, o.slug, o.status, o.product_id, o.product_name,
+SELECT o.id, o.name, o.slug, o.status, o.product_id, o.sector, o.allocated_seats, o.product_name,
        o.rc_number, o.sector, o.allocated_seats, o.created_at, o.updated_at,
        (SELECT COUNT(*) FROM members_accounts m WHERE m.org_id = o.id) AS member_count
 FROM organizations o
@@ -127,18 +130,20 @@ type ListOrgsParams struct {
 }
 
 type ListOrgsRow struct {
-	ID             uuid.UUID      `db:"id" json:"id"`
-	Name           string         `db:"name" json:"name"`
-	Slug           string         `db:"slug" json:"slug"`
-	Status         string         `db:"status" json:"status"`
-	ProductID      uuid.UUID      `db:"product_id" json:"product_id"`
-	ProductName    string         `db:"product_name" json:"product_name"`
-	RcNumber       sql.NullString `db:"rc_number" json:"rc_number"`
-	Sector         sql.NullString `db:"sector" json:"sector"`
-	AllocatedSeats int32          `db:"allocated_seats" json:"allocated_seats"`
-	CreatedAt      time.Time      `db:"created_at" json:"created_at"`
-	UpdatedAt      time.Time      `db:"updated_at" json:"updated_at"`
-	MemberCount    int64          `db:"member_count" json:"member_count"`
+	ID               uuid.UUID `db:"id" json:"id"`
+	Name             string    `db:"name" json:"name"`
+	Slug             string    `db:"slug" json:"slug"`
+	Status           string    `db:"status" json:"status"`
+	ProductID        uuid.UUID `db:"product_id" json:"product_id"`
+	Sector           string    `db:"sector" json:"sector"`
+	AllocatedSeats   int32     `db:"allocated_seats" json:"allocated_seats"`
+	ProductName      string    `db:"product_name" json:"product_name"`
+	RcNumber         string    `db:"rc_number" json:"rc_number"`
+	Sector_2         string    `db:"sector_2" json:"sector_2"`
+	AllocatedSeats_2 int32     `db:"allocated_seats_2" json:"allocated_seats_2"`
+	CreatedAt        time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt        time.Time `db:"updated_at" json:"updated_at"`
+	MemberCount      int64     `db:"member_count" json:"member_count"`
 }
 
 func (q *Queries) ListOrgs(ctx context.Context, arg ListOrgsParams) ([]ListOrgsRow, error) {
@@ -156,10 +161,12 @@ func (q *Queries) ListOrgs(ctx context.Context, arg ListOrgsParams) ([]ListOrgsR
 			&i.Slug,
 			&i.Status,
 			&i.ProductID,
-			&i.ProductName,
-			&i.RcNumber,
 			&i.Sector,
 			&i.AllocatedSeats,
+			&i.ProductName,
+			&i.RcNumber,
+			&i.Sector_2,
+			&i.AllocatedSeats_2,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MemberCount,

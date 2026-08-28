@@ -101,12 +101,12 @@ type Organization struct {
 	LogoUrl        sql.NullString `db:"logo_url" json:"logo_url"`
 	ProductID      uuid.UUID      `db:"product_id" json:"product_id"`
 	ProductName    string         `db:"product_name" json:"product_name"`
+	Sector         string         `db:"sector" json:"sector"`
+	AllocatedSeats int32          `db:"allocated_seats" json:"allocated_seats"`
+	RcNumber       string         `db:"rc_number" json:"rc_number"`
 	CreatedAt      time.Time      `db:"created_at" json:"created_at"`
 	UpdatedAt      time.Time      `db:"updated_at" json:"updated_at"`
 	Status         string         `db:"status" json:"status"`
-	RcNumber       sql.NullString `db:"rc_number" json:"rc_number"`
-	Sector         sql.NullString `db:"sector" json:"sector"`
-	AllocatedSeats int32          `db:"allocated_seats" json:"allocated_seats"`
 }
 
 type PasswordReset struct {

@@ -1,9 +1,9 @@
 -- name: CreateOrganization :one
 INSERT INTO organizations (
-    name, slug, product_name, product_id
+    name, slug, product_name, product_id, sector, allocated_seats
 )
 VALUES (
-    $1, $2, $3, $4
+    $1, $2, $3, $4, $5, $6
 )
 RETURNING *;
 
@@ -12,7 +12,7 @@ SELECT * FROM organizations
 WHERE id = $1 LIMIT 1;
 
 -- name: ListOrgs :many
-SELECT o.id, o.name, o.slug, o.status, o.product_id, o.product_name,
+SELECT o.id, o.name, o.slug, o.status, o.product_id, o.sector, o.allocated_seats, o.product_name,
        o.rc_number, o.sector, o.allocated_seats, o.created_at, o.updated_at,
        (SELECT COUNT(*) FROM members_accounts m WHERE m.org_id = o.id) AS member_count
 FROM organizations o
