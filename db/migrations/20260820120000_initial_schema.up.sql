@@ -43,7 +43,6 @@ CREATE TABLE oauth_clients (
 
 CREATE INDEX idx_oauth_clients_client_id ON oauth_clients(client_id);
 
--- Organizations
 CREATE TABLE organizations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
@@ -52,7 +51,7 @@ CREATE TABLE organizations (
     product_id UUID NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
     product_name VARCHAR(500) NOT NULL,
     sector VARCHAR(255) NOT NULL,
-    allocated_seats INT NOT NULL,
+    allocated_seats INT NOT NULL DEFAULT 5,
     rc_number VARCHAR(15) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
