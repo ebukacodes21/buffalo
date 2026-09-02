@@ -110,13 +110,16 @@ type UserRow struct {
 }
 
 type OnboardInput struct {
-	OrgName       string `json:"name"`
-	ProductID     string `json:"product_id"`
-	ProductName   string `json:"product_name"`
-	Slug          string `json:"slug"`
-	OwnerName     string `json:"owner_name"`
-	OwnerEmail    string `json:"owner_email"`
-	OwnerPassword string `json:"owner_password"`
+	OrgName        string `json:"name"`
+	ProductID      string `json:"product_id"`
+	ProductName    string `json:"product_name"`
+	Slug           string `json:"slug"`
+	OwnerName      string `json:"owner_name"`
+	OwnerEmail     string `json:"owner_email"`
+	OwnerPassword  string `json:"owner_password"`
+	Sector         string `json:"sector"`
+	AllocatedSeats int    `json:"allocated_seats"`
+	RCNumber       string `json:"rc_number"`
 }
 
 type OnboardResult struct {

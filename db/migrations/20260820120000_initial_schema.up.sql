@@ -52,7 +52,7 @@ CREATE TABLE organizations (
     product_name VARCHAR(500) NOT NULL,
     sector VARCHAR(255) NOT NULL,
     allocated_seats INT NOT NULL DEFAULT 5,
-    rc_number VARCHAR(15) NOT NULL,
+    rc_number VARCHAR(15) UNIQUE NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

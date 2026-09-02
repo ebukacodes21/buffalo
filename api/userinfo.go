@@ -55,6 +55,11 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 			apiError(w, http.StatusInternalServerError, fmt.Errorf("organizations lookup error"))
 			return
 		}
+		entitlements, err := a.Svc.ListEntitlements(ctx, m.OrgID)
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, fmt.Errorf("entitlements lookup error"))
+			return
+		}
 		out, err := json.Marshal(map[string]any{
 			"sub":                m.ID,
 			"org_id":             m.OrgID,
@@ -69,6 +74,7 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 			"is_platform_admin":  false,
 			"roles":              rolesForMember(m.Role),
 			"organization":       org,
+			"entitlements":       entitlements,
 		})
 		if err != nil {
 			apiError(w, http.StatusInternalServerError, fmt.Errorf("userinfo marshalling error"))

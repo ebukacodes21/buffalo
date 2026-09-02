@@ -1,9 +1,9 @@
 -- name: CreateOrganization :one
 INSERT INTO organizations (
-    name, slug, product_name, product_id, sector, allocated_seats
+    name, slug, product_name, product_id, sector, rc_number, allocated_seats
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7
 )
 RETURNING *;
 

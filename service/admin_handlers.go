@@ -383,10 +383,13 @@ func (b *Buffalo) OnboardBusiness(ctx context.Context, in OnboardInput) (*Onboar
 
 	err = b.repo.ExecTx(ctx, func(q *db.Queries) error {
 		org, err := q.CreateOrganization(ctx, db.CreateOrganizationParams{
-			Name:        in.OrgName,
-			Slug:        slug,
-			ProductName: in.ProductName,
-			ProductID:   prdID,
+			Name:           in.OrgName,
+			Slug:           slug,
+			ProductName:    in.ProductName,
+			ProductID:      prdID,
+			Sector:         in.Sector,
+			AllocatedSeats: int32(in.AllocatedSeats),
+			RcNumber:       in.RCNumber,
 		})
 		if err != nil {
 			return err

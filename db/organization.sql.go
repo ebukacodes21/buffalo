@@ -14,10 +14,10 @@ import (
 
 const createOrganization = `-- name: CreateOrganization :one
 INSERT INTO organizations (
-    name, slug, product_name, product_id, sector, allocated_seats
+    name, slug, product_name, product_id, sector, rc_number, allocated_seats
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7
 )
 RETURNING id, name, slug, logo_url, product_id, product_name, sector, allocated_seats, rc_number, created_at, updated_at, status
 `
@@ -28,6 +28,7 @@ type CreateOrganizationParams struct {
 	ProductName    string    `db:"product_name" json:"product_name"`
 	ProductID      uuid.UUID `db:"product_id" json:"product_id"`
 	Sector         string    `db:"sector" json:"sector"`
+	RcNumber       string    `db:"rc_number" json:"rc_number"`
 	AllocatedSeats int32     `db:"allocated_seats" json:"allocated_seats"`
 }
 
@@ -38,6 +39,7 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.ProductName,
 		arg.ProductID,
 		arg.Sector,
+		arg.RcNumber,
 		arg.AllocatedSeats,
 	)
 	var i Organization

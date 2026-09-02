@@ -75,6 +75,14 @@ func Start(httpServer *http.Server, privateKey []byte, config Config, svc *servi
 	mux.HandleFunc("POST /api/admin/users/{id}/active", a.adminAPIGuard(a.apiUserSetActive))
 	mux.HandleFunc("GET /api/admin/audit", a.adminAPIGuard(a.apiAuditList))
 
+	// Product-scoped member API (products like TerraSell relay the signed-in
+	// member's own token; requests are scoped to that member's org)
+	mux.HandleFunc("GET /api/product/members", a.memberAPIGuard(a.apiProductMembersList))
+	mux.HandleFunc("POST /api/product/members", a.memberAPIGuard(a.apiProductMembersAdd))
+	mux.HandleFunc("POST /api/product/members/{memberID}/role", a.memberAPIGuard(a.apiProductMembersRole))
+	mux.HandleFunc("POST /api/product/members/{memberID}/remove", a.memberAPIGuard(a.apiProductMembersRemove))
+	mux.HandleFunc("POST /api/product/members/me/password", a.memberAPIGuard(a.apiProductMembersChangePassword))
+
 	httpServer.Handler = CSRFMiddleware(privateKey, mux)
 
 	return httpServer.ListenAndServe()
