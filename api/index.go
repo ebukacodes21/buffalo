@@ -3,29 +3,12 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 )
 
 func (a *api) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
-	}
-
-	returnURL, appName := "", ""
-	if c, err := r.Cookie("last_client"); err == nil && c.Value != "" {
-		// OAuth clients live in the database (managed via the Arkad console).
-		if client, err := a.Svc.GetActiveClientByClientID(r.Context(), c.Value); err == nil && len(client.RedirectUris) > 0 {
-			if u, err := url.Parse(client.RedirectUris[0]); err == nil && u.Host != "" {
-				returnURL = u.Scheme + "://" + u.Host
-				appName = u.Host
-			}
-		}
-	}
-
-	continueBtn := ""
-	if returnURL != "" {
-		continueBtn = fmt.Sprintf(`<a class="btn btn-primary-ext" href="%s">Continue to %s</a>`, returnURL, appName)
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -82,7 +65,6 @@ func (a *api) index(w http.ResponseWriter, r *http.Request) {
             <div class="msg">
                 <h1>Buffalo Identity Provider</h1>
                 <p>Please start the sign-in flow from the application.</p>
-                ` + continueBtn + `
                 <button type="button" class="btn btn-secondary" id="backBtn" onclick="history.back()">Go back</button>
             </div>
             <div class="footer">
