@@ -17,6 +17,10 @@ func (a *api) discovery(w http.ResponseWriter, _ *http.Request) {
 		JwksURI:                           fmt.Sprintf("%s/jwks", a.Config.Url),
 		ScopesSupported:                   []string{"oidc", "openid", "offline_access"},
 		ResponseTypesSupported:            []string{"code"},
+		ResponseModesSupported:            []string{"query"},
+		GrantTypesSupported:               []string{"authorization_code", "refresh_token"},
+		SubjectTypesSupported:             []string{"public"},
+		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
 		TokenEndpointAuthMethodsSupported: []string{"none"},
 		CodeChallengeMethodsSupported:     []string{"S256", "plain"},
 	}
