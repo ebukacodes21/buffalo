@@ -15,8 +15,9 @@ import (
 // The product-scoped member API lets a product like TerraSell manage the
 // membership of the signed-in member's own organization. Products relay the
 // member's own buffalo access token; every request is scoped to the calling
-// member's org, never to someone else's. Role and removal are restricted to
-// org owners and admins; any active member may read the roster.
+// member's org, never to someone else's. Roles are stored as the product's
+// role keys (tmpl_*); role and removal mutations are limited to manager-tier
+// members, while any active member may read the roster.
 
 // memberAPIGuard authenticates an active org member (a member-subject token
 // with the userinfo audience), mirroring adminAPIGuard but without the
@@ -68,11 +69,27 @@ func (a *api) memberAPIGuard(next func(http.ResponseWriter, *http.Request, *serv
 	}
 }
 
-// requireMemberManage allows role/removal mutations for org owners and
-// admins only.
+// memberCanManage reports whether a product role may manage the roster.
+// The member's role is the TerraSell role key stored directly (tmpl_*), so
+// only the workspace-administrator tier (tenant admin / HQ / manager) can
+// add, re-role or remove members; field reps and drivers cannot. The platform's
+// workspace-admin key (admin) acts like tenant admin so the onboarding-created
+// admin may invite his team.
+func memberCanManage(role string) bool {
+	switch role {
+	case "tmpl_tenant_admin", "tmpl_hq", "tmpl_manager",
+		"tmpl_admin", "admin":
+		return true
+	default:
+		return false
+	}
+}
+
+// requireMemberManage allows role/removal mutations for manager-tier members
+// only (see memberCanManage).
 func (a *api) requireMemberManage(w http.ResponseWriter, actor *service.Member) bool {
-	if actor.Role != "owner" && actor.Role != "admin" {
-		writeJSONError(w, http.StatusForbidden, "organization owners and admins only")
+	if !memberCanManage(actor.Role) {
+		writeJSONError(w, http.StatusForbidden, "organization admin-level role required")
 		return false
 	}
 	return true
@@ -131,13 +148,6 @@ func (a *api) apiProductMembersAdd(w http.ResponseWriter, r *http.Request, actor
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if req.Role == "" {
-		req.Role = "member"
-	}
-	if req.Role != "owner" && req.Role != "admin" && req.Role != "member" {
-		writeJSONError(w, http.StatusBadRequest, "role must be owner, admin or member")
-		return
-	}
 	if req.Email == "" || !strings.Contains(req.Email, "@") {
 		writeJSONError(w, http.StatusBadRequest, "email is required")
 		return
@@ -198,12 +208,9 @@ func (a *api) apiProductMembersRole(w http.ResponseWriter, r *http.Request, acto
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Role != "owner" && req.Role != "admin" && req.Role != "member" {
-		writeJSONError(w, http.StatusBadRequest, "role must be owner, admin or member")
-		return
-	}
-	member, ok := a.guardLastOwner(w, r.Context(), actor.OrgID, r.PathValue("memberID"), req.Role)
-	if !ok {
+	member, err := a.Svc.GetMember(r.Context(), actor.OrgID, r.PathValue("memberID"))
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "member not found")
 		return
 	}
 	if err := a.Svc.UpdateMemberRole(r.Context(), actor.OrgID, member.ID, req.Role); err != nil {
@@ -220,8 +227,9 @@ func (a *api) apiProductMembersRemove(w http.ResponseWriter, r *http.Request, ac
 	if !a.requireMemberManage(w, actor) {
 		return
 	}
-	member, ok := a.guardLastOwner(w, r.Context(), actor.OrgID, r.PathValue("memberID"), "")
-	if !ok {
+	member, err := a.Svc.GetMember(r.Context(), actor.OrgID, r.PathValue("memberID"))
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "member not found")
 		return
 	}
 	if err := a.Svc.RemoveMember(r.Context(), actor.OrgID, member.ID); err != nil {
