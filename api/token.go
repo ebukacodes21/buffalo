@@ -92,6 +92,7 @@ func (a *api) tokenFromCode(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusInternalServerError, fmt.Errorf("token marshalling error: %v", err))
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(out)
 }
 
@@ -140,6 +141,7 @@ func (a *api) tokenFromRefresh(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusInternalServerError, fmt.Errorf("token marshalling error: %v", err))
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(out)
 }
 

@@ -26,5 +26,6 @@ func (a *api) discovery(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(o)
 }
