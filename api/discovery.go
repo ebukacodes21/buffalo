@@ -15,9 +15,10 @@ func (a *api) discovery(w http.ResponseWriter, _ *http.Request) {
 		TokenEndpoint:                     fmt.Sprintf("%s/token", a.Config.Url),
 		UserinfoEndpoint:                  fmt.Sprintf("%s/userinfo", a.Config.Url),
 		JwksURI:                           fmt.Sprintf("%s/jwks", a.Config.Url),
-		ScopesSupported:                   []string{"oidc"},
+		ScopesSupported:                   []string{"oidc", "openid", "offline_access"},
 		ResponseTypesSupported:            []string{"code"},
 		TokenEndpointAuthMethodsSupported: []string{"none"},
+		CodeChallengeMethodsSupported:     []string{"S256", "plain"},
 	}
 
 	o, err := json.Marshal(discovery)
