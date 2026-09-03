@@ -42,19 +42,23 @@ func (a *api) authorization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// PKCE is optional for confidential clients but the only viable mode for
-	// public ones (mobile apps) — they cannot hold a client secret.
-	codeChallenge := r.URL.Query().Get("code_challenge")
-	codeChallengeMethod := r.URL.Query().Get("code_challenge_method")
-	if codeChallenge != "" {
-		if codeChallengeMethod == "" {
-			codeChallengeMethod = "plain"
-		}
-		if codeChallengeMethod != "S256" && codeChallengeMethod != "plain" {
-			apiError(w, http.StatusBadRequest, fmt.Errorf("unsupported code_challenge_method"))
-			return
-		}
+// PKCE is optional for confidential clients but the only viable mode for
+// public ones (mobile apps) — they cannot hold a client secret.
+codeChallenge := r.URL.Query().Get("code_challenge")
+codeChallengeMethod := r.URL.Query().Get("code_challenge_method")
+if codeChallenge != "" {
+	if codeChallengeMethod == "" {
+		codeChallengeMethod = "plain"
 	}
+	if codeChallengeMethod != "S256" && codeChallengeMethod != "plain" {
+		apiError(w, http.StatusBadRequest, fmt.Errorf("unsupported code_challenge_method"))
+		return
+	}
+}
+
+// Bridge the OIDC nonce across the authorization + token legs so the id_token
+// can echo it back. Missing when the client didn't send one.
+nonce := r.URL.Query().Get("nonce")
 
 	// OAuth clients live in the database (managed via the Arkad console).
 	appConfig := AppConfig{}
@@ -103,6 +107,7 @@ func (a *api) authorization(w http.ResponseWriter, r *http.Request) {
 		AppConfig:           appConfig,
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
+		Nonce:               nonce,
 	}
 
 	http.SetCookie(w, &http.Cookie{

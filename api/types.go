@@ -40,6 +40,9 @@ type Payload struct {
 	// clients, which keep authenticating with client_secret.
 	CodeChallenge       string
 	CodeChallengeMethod string
+	// Nonce bound to the authorization request (OIDC). Echoed back verbatim
+	// into the issued id_token so AppAuth clients can compare it.
+	Nonce string
 	// Organizations carries each org the member belongs to (role + paid
 	// entitlements) so products can gate features without extra round trips.
 	// Empty for platform admins.

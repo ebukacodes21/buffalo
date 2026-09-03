@@ -208,6 +208,9 @@ func (a *api) issueTokens(payload Payload, refreshToken string) service.Token {
 		"nbf":   time.Now().Unix(),
 		"iat":   time.Now().Unix(),
 	})
+	if payload.Nonce != "" {
+		token.Claims.(jwt.MapClaims)["nonce"] = payload.Nonce
+	}
 	token.Header["kid"] = "buffalo_v1"
 	sigIdToken, err := token.SignedString(pk)
 	if err != nil {
