@@ -71,6 +71,7 @@ type MembersAccount struct {
 	IsActive          bool           `db:"is_active" json:"is_active"`
 	CreatedAt         time.Time      `db:"created_at" json:"created_at"`
 	UpdatedAt         time.Time      `db:"updated_at" json:"updated_at"`
+	SupervisorID      uuid.NullUUID  `db:"supervisor_id" json:"supervisor_id"`
 }
 
 type OauthClient struct {

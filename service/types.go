@@ -63,8 +63,9 @@ type Member struct {
 	PasswordHash      string    `json:"password_hash"`
 	Name              string    `db:"name" json:"name"`
 	GivenName         string    `json:"given_name"`
-	FamilyName        string    `son:"family_name"`
+	FamilyName        string    `json:"family_name"`
 	Picture           string    `json:"picture"`
+	SupervisorID      string    `json:"supervisor_id"`
 	PreferredUsername string    `json:"preferred_username"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
@@ -119,9 +120,10 @@ type OnboardInput struct {
 	ProductID      string `json:"product_id"`
 	ProductName    string `json:"product_name"`
 	Slug           string `json:"slug"`
-	OwnerName      string `json:"owner_name"`
-	OwnerEmail     string `json:"owner_email"`
-	OwnerPassword  string `json:"owner_password"`
+	AdminName      string `json:"admin_name"`
+	AdminEmail     string `json:"admin_email"`
+	AdminPassword  string `json:"admin_password"`
+	AdminRole      string `json:"admin_role"`
 	Sector         string `json:"sector"`
 	AllocatedSeats int    `json:"allocated_seats"`
 	RCNumber       string `json:"rc_number"`
@@ -129,7 +131,7 @@ type OnboardInput struct {
 
 type OnboardResult struct {
 	Org    Organization `json:"organization"`
-	Member Member       `json:"owner_membership"`
+	Member Member       `json:"admin_membership"`
 }
 
 type OrgListing struct {
@@ -138,13 +140,14 @@ type OrgListing struct {
 }
 
 type MemberListing struct {
-	ID        string    `json:"id"`
-	OrgID     string    `json:"org_id"`
-	Role      string    `json:"role"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	OrgID           string    `json:"org_id"`
+	Role            string    `json:"role"`
+	Email           string    `json:"email"`
+	Name            string    `json:"name"`
+	SupervisorID    string    `json:"supervisor_id"`
+	IsActive        bool      `json:"is_active"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type OauthClient struct {

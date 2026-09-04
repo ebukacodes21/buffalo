@@ -10,6 +10,7 @@ import (
 
 	"github.com/ebukacodes21/buffalo/db"
 	"github.com/ebukacodes21/buffalo/tooling"
+	"github.com/google/uuid"
 )
 
 func (b *Buffalo) GetMemberByID(ctx context.Context, id string) (*Member, error) {
@@ -119,8 +120,53 @@ func mapMember(m db.MembersAccount) *Member {
 		GivenName:         m.GivenName.String,
 		FamilyName:        m.FamilyName.String,
 		Picture:           m.Picture.String,
+		SupervisorID:      uuidToStr(m.SupervisorID),
 		PreferredUsername: m.PreferredUsername.String,
 		CreatedAt:         m.CreatedAt,
 		UpdatedAt:         m.UpdatedAt,
 	}
+}
+
+// uuidToStr converts a nullable UUID to its string form, or "" when null.
+func uuidToStr(u uuid.NullUUID) string {
+	if !u.Valid || u.UUID == uuid.Nil {
+		return ""
+	}
+	return u.UUID.String()
+}
+
+// SetSupervisor assigns the member's supervisor by UUID. An empty value clears
+// the supervisor (null); the null UUID is normalized to empty.
+func (b *Buffalo) SetSupervisor(ctx context.Context, orgID, memberID, supervisorID string) error {
+	oid, err := tooling.ParseUUID(orgID)
+	if err != nil {
+		return err
+	}
+	mid, err := tooling.ParseUUID(memberID)
+	if err != nil {
+		return err
+	}
+	var sup uuid.UUID
+	if strings.TrimSpace(supervisorID) != "" {
+		sup, err = tooling.ParseUUID(supervisorID)
+		if err != nil {
+			return err
+		}
+	}
+	return b.repo.UpdateMemberSupervisor(ctx, db.UpdateMemberSupervisorParams{
+		OrgID: oid, ID: mid, SupervisorID: uuid.NullUUID{UUID: sup, Valid: sup != uuid.Nil},
+	})
+}
+
+// SupervisorNameByID resolves a supervisor member's name from the org roster.
+func supervisorNameByID(roster []MemberListing, supervisorID string) string {
+	if strings.TrimSpace(supervisorID) == "" {
+		return ""
+	}
+	for _, m := range roster {
+		if m.ID == supervisorID {
+			return m.Name
+		}
+	}
+	return ""
 }

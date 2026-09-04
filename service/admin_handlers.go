@@ -100,13 +100,14 @@ func (b *Buffalo) ListMembers(ctx context.Context, orgID string) ([]MemberListin
 	out := make([]MemberListing, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, MemberListing{
-			ID:        r.ID.String(),
-			OrgID:     r.OrgID.String(),
-			Role:      r.Role,
-			Email:     r.Email,
-			Name:      r.Name,
-			IsActive:  r.IsActive,
-			CreatedAt: r.CreatedAt,
+			ID:              r.ID.String(),
+			OrgID:           r.OrgID.String(),
+			Role:            r.Role,
+			Email:           r.Email,
+			Name:            r.Name,
+			SupervisorID:    uuidToStr(r.SupervisorID),
+			IsActive:        r.IsActive,
+			CreatedAt:       r.CreatedAt,
 		})
 	}
 	return out, nil
@@ -362,21 +363,26 @@ func (b *Buffalo) OnboardBusiness(ctx context.Context, in OnboardInput) (*Onboar
 		return nil, err
 	}
 
-	hash, err := tooling.HashPassword(in.OwnerPassword)
+	hash, err := tooling.HashPassword(in.AdminPassword)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	email := strings.ToLower(strings.TrimSpace(in.OwnerEmail))
-	name := strings.TrimSpace(in.OwnerName)
-	ownerName := strings.Fields(name)
+	email := strings.ToLower(strings.TrimSpace(in.AdminEmail))
+	name := strings.TrimSpace(in.AdminName)
+	adminName := strings.Fields(name)
+
+	adminRole := strings.TrimSpace(in.AdminRole)
+	if adminRole == "" {
+		adminRole = "admin"
+	}
 
 	var given, family string
-	if len(ownerName) > 0 {
-		given = ownerName[0]
+	if len(adminName) > 0 {
+		given = adminName[0]
 	}
-	if len(ownerName) > 1 {
-		family = ownerName[len(ownerName)-1]
+	if len(adminName) > 1 {
+		family = adminName[len(adminName)-1]
 	}
 
 	result := &OnboardResult{}
@@ -397,7 +403,7 @@ func (b *Buffalo) OnboardBusiness(ctx context.Context, in OnboardInput) (*Onboar
 
 		member, err := q.CreateMember(ctx, db.CreateMemberParams{
 			OrgID:             org.ID,
-			Role:              "owner",
+			Role:              adminRole,
 			Email:             email,
 			PasswordHash:      hash,
 			Name:              name,

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -102,12 +103,14 @@ func (a *api) auditMemberAPI(r *http.Request, actor *service.Member, eventType s
 }
 
 type productMemberRow struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	Role      string    `json:"role"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Email          string    `json:"email"`
+	Role           string    `json:"role"`
+	SupervisorID   string    `json:"supervisor_id"`
+	SupervisorName string    `json:"supervisor_name"`
+	IsActive       bool      `json:"is_active"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func (a *api) apiProductMembersList(w http.ResponseWriter, r *http.Request, actor *service.Member) {
@@ -118,6 +121,10 @@ func (a *api) apiProductMembersList(w http.ResponseWriter, r *http.Request, acto
 	}
 
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	byID := make(map[string]string, len(members))
+	for _, m := range members {
+		byID[m.ID] = m.Name
+	}
 	out := make([]productMemberRow, 0, len(members))
 	for _, m := range members {
 		if q != "" &&
@@ -125,8 +132,11 @@ func (a *api) apiProductMembersList(w http.ResponseWriter, r *http.Request, acto
 			!strings.Contains(strings.ToLower(m.Email), q) {
 			continue
 		}
+		supervisorID := strings.TrimSpace(m.SupervisorID)
 		out = append(out, productMemberRow{
 			ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role,
+			SupervisorID:   supervisorID,
+			SupervisorName: byID[supervisorID],
 			IsActive: m.IsActive, CreatedAt: m.CreatedAt,
 		})
 	}
@@ -193,10 +203,79 @@ func (a *api) apiProductMembersAdd(w http.ResponseWriter, r *http.Request, actor
 		return
 	}
 
+	// Assign the supervisor by member UUID when a manager-tier supervisor was
+	// chosen. The workspace admin (and anyone without a supervisor) is left
+	// null — a null UUID, indicating no reports-to.
+	supervisorID := strings.TrimSpace(req.SupervisorID)
+	if supervisorID != "" {
+		if _, ok := a.resolveSupervisor(r.Context(), actor.OrgID, supervisorID); !ok {
+			writeJSONError(w, http.StatusBadRequest, "supervisor must be a manager in this organization")
+			return
+		}
+		if err := a.Svc.SetSupervisor(r.Context(), actor.OrgID, memberID, supervisorID); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
 	a.auditMemberAPI(r, actor, "member.added", map[string]interface{}{
-		"email": req.Email, "role": req.Role,
+		"email": req.Email, "role": req.Role, "supervisor_id": supervisorID,
 	})
 	writeJSON(w, http.StatusCreated, map[string]string{"member_id": memberID})
+}
+
+// resolveSupervisor reports whether the supervisor member UUID belongs to an
+// active manager-tier member of the org.
+func (a *api) resolveSupervisor(ctx context.Context, orgID, supervisorID string) (string, bool) {
+	supervisorID = strings.TrimSpace(supervisorID)
+	if supervisorID == "" {
+		return "", false
+	}
+	roster, err := a.Svc.ListMembers(ctx, orgID)
+	if err != nil {
+		return "", false
+	}
+	for _, m := range roster {
+		if m.ID == supervisorID && memberCanManage(m.Role) {
+			return supervisorID, true
+		}
+	}
+	return "", false
+}
+
+func (a *api) apiProductMembersSupervisor(w http.ResponseWriter, r *http.Request, actor *service.Member) {
+	if !a.requireMemberManage(w, actor) {
+		return
+	}
+	var req roleSupervisorRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	member, err := a.Svc.GetMember(r.Context(), actor.OrgID, r.PathValue("memberID"))
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "member not found")
+		return
+	}
+	sup := strings.TrimSpace(req.SupervisorID)
+	if sup != "" {
+		if _, ok := a.resolveSupervisor(r.Context(), actor.OrgID, sup); !ok {
+			writeJSONError(w, http.StatusBadRequest, "supervisor must be a manager in this organization")
+			return
+		}
+	}
+	if err := a.Svc.SetSupervisor(r.Context(), actor.OrgID, member.ID, sup); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.auditMemberAPI(r, actor, "member.supervisor_changed", map[string]interface{}{
+		"email": member.Email, "supervisor_id": sup,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+type roleSupervisorRequest struct {
+	SupervisorID string `json:"supervisor_id"`
 }
 
 func (a *api) apiProductMembersRole(w http.ResponseWriter, r *http.Request, actor *service.Member) {

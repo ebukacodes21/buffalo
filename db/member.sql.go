@@ -36,7 +36,7 @@ INSERT INTO members_accounts (
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
-RETURNING id, org_id, role, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at
+RETURNING id, org_id, role, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at, supervisor_id
 `
 
 type CreateMemberParams struct {
@@ -81,12 +81,13 @@ func (q *Queries) CreateMember(ctx context.Context, arg CreateMemberParams) (Mem
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SupervisorID,
 	)
 	return i, err
 }
 
 const getMemberByEmail = `-- name: GetMemberByEmail :one
-SELECT id, org_id, role, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at FROM members_accounts 
+SELECT id, org_id, role, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at, supervisor_id FROM members_accounts 
 WHERE email = $1 LIMIT 1
 `
 
@@ -108,12 +109,13 @@ func (q *Queries) GetMemberByEmail(ctx context.Context, email string) (MembersAc
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SupervisorID,
 	)
 	return i, err
 }
 
 const getMemberByID = `-- name: GetMemberByID :one
-SELECT id, org_id, role, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at FROM members_accounts 
+SELECT id, org_id, role, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at, supervisor_id FROM members_accounts 
 WHERE id = $1 LIMIT 1
 `
 
@@ -135,12 +137,13 @@ func (q *Queries) GetMemberByID(ctx context.Context, id uuid.UUID) (MembersAccou
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SupervisorID,
 	)
 	return i, err
 }
 
 const getMemberByOrgAndEmail = `-- name: GetMemberByOrgAndEmail :one
-SELECT id, org_id, role, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at FROM members_accounts
+SELECT id, org_id, role, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at, supervisor_id FROM members_accounts
 WHERE org_id = $1 AND email = $2 LIMIT 1
 `
 
@@ -167,12 +170,13 @@ func (q *Queries) GetMemberByOrgAndEmail(ctx context.Context, arg GetMemberByOrg
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SupervisorID,
 	)
 	return i, err
 }
 
 const getMemberByOrgAndID = `-- name: GetMemberByOrgAndID :one
-SELECT id, org_id, role, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at FROM members_accounts
+SELECT id, org_id, role, email, email_verified, password_hash, name, given_name, family_name, picture, preferred_username, is_active, created_at, updated_at, supervisor_id FROM members_accounts
 WHERE org_id = $1 AND id = $2 LIMIT 1
 `
 
@@ -199,12 +203,13 @@ func (q *Queries) GetMemberByOrgAndID(ctx context.Context, arg GetMemberByOrgAnd
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SupervisorID,
 	)
 	return i, err
 }
 
 const listMembersByOrg = `-- name: ListMembersByOrg :many
-SELECT id, org_id, role, email, is_active, name, given_name, family_name, picture, preferred_username, created_at
+SELECT id, org_id, role, email, is_active, name, given_name, family_name, picture, preferred_username, supervisor_id, created_at
 FROM members_accounts
 WHERE org_id = $1
 ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, created_at
@@ -221,6 +226,7 @@ type ListMembersByOrgRow struct {
 	FamilyName        sql.NullString `db:"family_name" json:"family_name"`
 	Picture           sql.NullString `db:"picture" json:"picture"`
 	PreferredUsername sql.NullString `db:"preferred_username" json:"preferred_username"`
+	SupervisorID      uuid.NullUUID  `db:"supervisor_id" json:"supervisor_id"`
 	CreatedAt         time.Time      `db:"created_at" json:"created_at"`
 }
 
@@ -244,6 +250,7 @@ func (q *Queries) ListMembersByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 			&i.FamilyName,
 			&i.Picture,
 			&i.PreferredUsername,
+			&i.SupervisorID,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -340,5 +347,20 @@ type UpdateMemberRoleParams struct {
 
 func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) error {
 	_, err := q.db.ExecContext(ctx, updateMemberRole, arg.OrgID, arg.ID, arg.Role)
+	return err
+}
+
+const updateMemberSupervisor = `-- name: UpdateMemberSupervisor :exec
+UPDATE members_accounts SET supervisor_id = $3, updated_at = NOW() WHERE org_id = $1 AND id = $2
+`
+
+type UpdateMemberSupervisorParams struct {
+	OrgID        uuid.UUID     `db:"org_id" json:"org_id"`
+	ID           uuid.UUID     `db:"id" json:"id"`
+	SupervisorID uuid.NullUUID `db:"supervisor_id" json:"supervisor_id"`
+}
+
+func (q *Queries) UpdateMemberSupervisor(ctx context.Context, arg UpdateMemberSupervisorParams) error {
+	_, err := q.db.ExecContext(ctx, updateMemberSupervisor, arg.OrgID, arg.ID, arg.SupervisorID)
 	return err
 }

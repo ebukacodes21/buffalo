@@ -48,29 +48,39 @@ func (a *api) apiBusinessOnboard(w http.ResponseWriter, r *http.Request, actor *
 	}
 
 	req.OrgName = strings.TrimSpace(req.OrgName)
-	req.OwnerEmail = strings.ToLower(strings.TrimSpace(req.OwnerEmail))
-	req.OwnerName = strings.TrimSpace(req.OwnerName)
+	req.AdminEmail = strings.ToLower(strings.TrimSpace(req.AdminEmail))
+	req.AdminName = strings.TrimSpace(req.AdminName)
 
-	if req.OrgName == "" || req.OwnerEmail == "" || req.OwnerName == "" {
-		writeJSONError(w, http.StatusBadRequest, "name, owner_name and owner_email are required")
+	adminRole := strings.TrimSpace(req.AdminRole)
+	if adminRole == "" {
+		adminRole = "admin"
+	}
+	if adminRole != "owner" && adminRole != "admin" && adminRole != "member" {
+		writeJSONError(w, http.StatusBadRequest, "admin_role must be owner, admin or member")
 		return
 	}
-	if !strings.Contains(req.OwnerEmail, "@") {
-		writeJSONError(w, http.StatusBadRequest, "owner_email is not a valid email address")
+	req.AdminRole = adminRole
+
+	if req.OrgName == "" || req.AdminEmail == "" || req.AdminName == "" {
+		writeJSONError(w, http.StatusBadRequest, "name, admin_name and admin_email are required")
+		return
+	}
+	if !strings.Contains(req.AdminEmail, "@") {
+		writeJSONError(w, http.StatusBadRequest, "admin_email is not a valid email address")
 		return
 	}
 
-	password := req.OwnerPassword
+	password := req.AdminPassword
 	generated := false
 	if password == "" {
 		var err error
 		if password, err = tooling.GetRandomString(14); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "could not generate owner password")
+			writeJSONError(w, http.StatusInternalServerError, "could not generate admin password")
 			return
 		}
 		generated = true
 	} else if len(password) < 8 {
-		writeJSONError(w, http.StatusBadRequest, "owner_password must be at least 8 characters")
+		writeJSONError(w, http.StatusBadRequest, "admin_password must be at least 8 characters")
 		return
 	}
 
@@ -90,14 +100,14 @@ func (a *api) apiBusinessOnboard(w http.ResponseWriter, r *http.Request, actor *
 	}
 
 	a.auditAPI(r, actor, "org.created", result.Org.ID, map[string]interface{}{
-		"name": result.Org.Name, "slug": result.Org.Slug, "owner": req.OwnerEmail,
+		"name": result.Org.Name, "slug": result.Org.Slug, "admin": req.AdminEmail,
 	})
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"organization":     result.Org,
-		"owner_membership": result.Member,
-		"owner_credentials": map[string]interface{}{
-			"email":     req.OwnerEmail,
+		"organization":       result.Org,
+		"admin_membership":   result.Member,
+		"admin_credentials": map[string]interface{}{
+			"email":     req.AdminEmail,
 			"password":  password,
 			"generated": generated,
 		},

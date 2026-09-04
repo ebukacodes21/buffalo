@@ -80,6 +80,7 @@ func Start(httpServer *http.Server, privateKey []byte, config Config, svc *servi
 	mux.HandleFunc("GET /api/product/members", a.memberAPIGuard(a.apiProductMembersList))
 	mux.HandleFunc("POST /api/product/members", a.memberAPIGuard(a.apiProductMembersAdd))
 	mux.HandleFunc("POST /api/product/members/{memberID}/role", a.memberAPIGuard(a.apiProductMembersRole))
+	mux.HandleFunc("POST /api/product/members/{memberID}/supervisor", a.memberAPIGuard(a.apiProductMembersSupervisor))
 	mux.HandleFunc("POST /api/product/members/{memberID}/remove", a.memberAPIGuard(a.apiProductMembersRemove))
 	mux.HandleFunc("POST /api/product/members/me/password", a.memberAPIGuard(a.apiProductMembersChangePassword))
 

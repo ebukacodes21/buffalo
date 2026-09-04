@@ -18,7 +18,7 @@ WHERE m.id = $1 AND o.status = 'active'
 ORDER BY o.created_at;
 
 -- name: ListMembersByOrg :many
-SELECT id, org_id, role, email, is_active, name, given_name, family_name, picture, preferred_username, created_at
+SELECT id, org_id, role, email, is_active, name, given_name, family_name, picture, preferred_username, supervisor_id, created_at
 FROM members_accounts
 WHERE org_id = $1
 ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, created_at;
@@ -42,6 +42,9 @@ RETURNING *;
 
 -- name: UpdateMemberRole :exec
 UPDATE members_accounts SET role = $3, updated_at = NOW() WHERE org_id = $1 AND id = $2;
+
+-- name: UpdateMemberSupervisor :exec
+UPDATE members_accounts SET supervisor_id = $3, updated_at = NOW() WHERE org_id = $1 AND id = $2;
 
 -- name: RemoveMember :exec
 DELETE FROM members_accounts WHERE org_id = $1 AND id = $2;

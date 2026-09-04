@@ -10,10 +10,11 @@ import (
 )
 
 type addMemberRequest struct {
-	Email    string `json:"email"`
-	Name     string `json:"name"`
-	Password string `json:"password"`
-	Role     string `json:"role"`
+	Email        string `json:"email"`
+	Name         string `json:"name"`
+	Password     string `json:"password"`
+	Role         string `json:"role"`
+	SupervisorID string `json:"supervisor_id"`
 }
 
 func (a *api) apiMemberAdd(w http.ResponseWriter, r *http.Request, actor *service.User) {
