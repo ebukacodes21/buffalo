@@ -86,7 +86,6 @@ func (b *Buffalo) Stats(ctx context.Context) (*Stats, error) {
 }
 
 // ── Members ──
-
 func (b *Buffalo) ListMembers(ctx context.Context, orgID string) ([]MemberListing, error) {
 	id, err := tooling.ParseUUID(orgID)
 	if err != nil {
@@ -100,14 +99,14 @@ func (b *Buffalo) ListMembers(ctx context.Context, orgID string) ([]MemberListin
 	out := make([]MemberListing, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, MemberListing{
-			ID:              r.ID.String(),
-			OrgID:           r.OrgID.String(),
-			Role:            r.Role,
-			Email:           r.Email,
-			Name:            r.Name,
-			SupervisorID:    uuidToStr(r.SupervisorID),
-			IsActive:        r.IsActive,
-			CreatedAt:       r.CreatedAt,
+			ID:           r.ID.String(),
+			OrgID:        r.OrgID.String(),
+			Role:         r.Role,
+			Email:        r.Email,
+			Name:         r.Name,
+			SupervisorID: uuidToStr(r.SupervisorID),
+			IsActive:     r.IsActive,
+			CreatedAt:    r.CreatedAt,
 		})
 	}
 	return out, nil

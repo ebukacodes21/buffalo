@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ebukacodes21/buffalo/db"
+	"github.com/ebukacodes21/buffalo/tooling"
 	"github.com/google/uuid"
 )
 
@@ -46,7 +47,7 @@ func nullUUID(v string) uuid.NullUUID {
 	if v == "" {
 		return uuid.NullUUID{Valid: false}
 	}
-	id, err := uuid.Parse(v)
+	id, err := tooling.ParseUUID(v)
 	if err != nil {
 		return uuid.NullUUID{Valid: false}
 	}

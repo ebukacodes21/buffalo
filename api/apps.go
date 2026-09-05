@@ -61,6 +61,10 @@ func (a *api) apiAppCreate(w http.ResponseWriter, r *http.Request, actor *servic
 		writeJSONError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	if !safeText(req.Name) || hasScriptMarker(req.Name) {
+		writeJSONError(w, http.StatusBadRequest, "name contains characters that aren't allowed")
+		return
+	}
 	clientID, secret, err := newClientCredentials()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
@@ -131,6 +135,10 @@ func (a *api) apiAppUpdate(w http.ResponseWriter, r *http.Request, actor *servic
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		writeJSONError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if !safeText(req.Name) || hasScriptMarker(req.Name) {
+		writeJSONError(w, http.StatusBadRequest, "name contains characters that aren't allowed")
 		return
 	}
 	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")

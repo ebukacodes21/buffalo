@@ -135,6 +135,31 @@ func uuidToStr(u uuid.NullUUID) string {
 	return u.UUID.String()
 }
 
+// OrgSeatState reports how many active members fill the org's allocated seats.
+// A seat count of zero means the org has no limit configured; in that case the
+// used count is left at zero too (callers should skip the limit when allocated
+// is not positive).
+func (b *Buffalo) OrgSeatState(ctx context.Context, orgID string) (used, allocated int, err error) {
+	oid, err := tooling.ParseUUID(orgID)
+	if err != nil {
+		return 0, 0, err
+	}
+	org, err := b.repo.GetOrgByID(ctx, oid)
+	if err != nil {
+		return 0, 0, err
+	}
+	allocated = int(org.AllocatedSeats)
+	if allocated > 0 {
+		var count int64
+		count, err = b.repo.CountActiveMembersByOrg(ctx, oid)
+		if err != nil {
+			return 0, 0, err
+		}
+		used = int(count)
+	}
+	return used, allocated, nil
+}
+
 // SetSupervisor assigns the member's supervisor by UUID. An empty value clears
 // the supervisor (null); the null UUID is normalized to empty.
 func (b *Buffalo) SetSupervisor(ctx context.Context, orgID, memberID, supervisorID string) error {

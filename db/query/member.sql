@@ -51,3 +51,5 @@ DELETE FROM members_accounts WHERE org_id = $1 AND id = $2;
 
 -- name: CountMembersWithRole :one
 SELECT COUNT(*) FROM members_accounts WHERE org_id = $1 AND role = $2;
+-- name: CountActiveMembersByOrg :one
+SELECT COUNT(*) FROM members_accounts WHERE org_id = $1 AND is_active = true;

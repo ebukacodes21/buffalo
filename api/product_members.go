@@ -137,7 +137,7 @@ func (a *api) apiProductMembersList(w http.ResponseWriter, r *http.Request, acto
 			ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role,
 			SupervisorID:   supervisorID,
 			SupervisorName: byID[supervisorID],
-			IsActive: m.IsActive, CreatedAt: m.CreatedAt,
+			IsActive:       m.IsActive, CreatedAt: m.CreatedAt,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
@@ -158,8 +158,8 @@ func (a *api) apiProductMembersAdd(w http.ResponseWriter, r *http.Request, actor
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if req.Email == "" || !strings.Contains(req.Email, "@") {
-		writeJSONError(w, http.StatusBadRequest, "email is required")
+	if !validEmail(req.Email) {
+		writeJSONError(w, http.StatusBadRequest, "email is not a valid email address")
 		return
 	}
 
@@ -172,12 +172,26 @@ func (a *api) apiProductMembersAdd(w http.ResponseWriter, r *http.Request, actor
 	case err == nil:
 		memberID = existing.ID
 	case strings.Contains(err.Error(), "no rows"):
-		if strings.TrimSpace(req.Name) == "" {
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
 			writeJSONError(w, http.StatusBadRequest, "name is required when creating a new member")
+			return
+		}
+		if !lettersOnly(name) || hasScriptMarker(name) {
+			writeJSONError(w, http.StatusBadRequest, "name may only contain letters, spaces and . ' - & ( )")
 			return
 		}
 		if len(req.Password) < 8 {
 			writeJSONError(w, http.StatusBadRequest, "password of at least 8 characters is required when creating a new member")
+			return
+		}
+		usedSeats, allocSeats, seatErr := a.Svc.OrgSeatState(r.Context(), actor.OrgID)
+		if seatErr != nil {
+			writeJSONError(w, http.StatusInternalServerError, seatErr.Error())
+			return
+		}
+		if allocSeats > 0 && usedSeats >= allocSeats {
+			writeJSONError(w, http.StatusConflict, fmt.Sprintf("seat limit reached (%d/%d). Upgrade your subscription to add more members.", usedSeats, allocSeats))
 			return
 		}
 		hash, err := tooling.HashPassword(req.Password)
@@ -185,7 +199,6 @@ func (a *api) apiProductMembersAdd(w http.ResponseWriter, r *http.Request, actor
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		name := strings.TrimSpace(req.Name)
 		newMember, err := a.Svc.CreateMember(r.Context(), actor.OrgID, req.Role, req.Email, hash, name,
 			firstWord(name), lastWord(name), req.Email)
 		if err != nil {

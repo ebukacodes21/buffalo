@@ -1,16 +1,17 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v4"
 )
 
 func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	authHeader := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if authHeader == "" {
 		apiError(w, http.StatusUnauthorized, fmt.Errorf("authorization header missing"))
@@ -44,19 +45,36 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 	sub, _ := (*claims)["sub"].(string)
 	subType, _ := (*claims)["sub_type"].(string)
 
+	// Bound the identity lookups: a stalled pooler backend must surface as a
+	// fast 503 for the gateway to retry, not a silent hang that stacks up.
+	dbCtx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+
 	if subType == "member" {
-		m, err := a.Svc.GetMemberByID(ctx, sub)
+		m, err := a.Svc.GetMemberByID(dbCtx, sub)
 		if err != nil {
+			if dbCtx.Err() == context.DeadlineExceeded {
+				apiError(w, http.StatusServiceUnavailable, fmt.Errorf("identity database timeout"))
+				return
+			}
 			apiError(w, http.StatusNotFound, fmt.Errorf("member not found"))
 			return
 		}
-		org, err := a.Svc.ListMembershipForMember(ctx, sub)
+		org, err := a.Svc.ListMembershipForMember(dbCtx, sub)
 		if err != nil {
+			if dbCtx.Err() == context.DeadlineExceeded {
+				apiError(w, http.StatusServiceUnavailable, fmt.Errorf("identity database timeout"))
+				return
+			}
 			apiError(w, http.StatusInternalServerError, fmt.Errorf("organizations lookup error"))
 			return
 		}
-		entitlements, err := a.Svc.ListEntitlements(ctx, m.OrgID)
+		entitlements, err := a.Svc.ListEntitlements(dbCtx, m.OrgID)
 		if err != nil {
+			if dbCtx.Err() == context.DeadlineExceeded {
+				apiError(w, http.StatusServiceUnavailable, fmt.Errorf("identity database timeout"))
+				return
+			}
 			apiError(w, http.StatusInternalServerError, fmt.Errorf("entitlements lookup error"))
 			return
 		}
@@ -85,8 +103,12 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := a.Svc.GetUserByID(ctx, sub)
+	user, err := a.Svc.GetUserByID(dbCtx, sub)
 	if err != nil {
+		if dbCtx.Err() == context.DeadlineExceeded {
+			apiError(w, http.StatusServiceUnavailable, fmt.Errorf("identity database timeout"))
+			return
+		}
 		apiError(w, http.StatusNotFound, fmt.Errorf("user not found"))
 		return
 	}

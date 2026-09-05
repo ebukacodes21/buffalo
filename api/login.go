@@ -59,6 +59,11 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 			a.loginError(w, r, sessID, "Invalid email or password.")
 		}
 
+		if !validEmail(login) || hasScriptMarker(login) {
+			invalid()
+			return
+		}
+
 		rec, err := a.Svc.LookupEmail(ctx, login)
 		if err != nil || !tooling.VerifyPassword(rec.Password, password) {
 			invalid()
@@ -151,6 +156,10 @@ func (a *api) forgotPassword(w http.ResponseWriter, r *http.Request) {
 		}
 
 		email := strings.ToLower(strings.TrimSpace(r.PostForm.Get("email")))
+		if !validEmail(email) || hasScriptMarker(email) {
+			a.forgotPasswordResponse(w, r, resetLinkSentMsg, "")
+			return
+		}
 		obj, err := a.Svc.LookupEmail(ctx, email)
 		if err != nil {
 			a.forgotPasswordResponse(w, r, resetLinkSentMsg, "")

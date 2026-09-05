@@ -27,10 +27,10 @@ type Token struct {
 }
 
 type Jwks struct {
-	Keys []JwksKey `json:"keys"`
+	Keys []Key `json:"keys"`
 }
 
-type JwksKey struct {
+type Key struct {
 	N   string `json:"n"`
 	E   string `json:"e"`
 	Alg string `json:"alg"`
@@ -140,14 +140,14 @@ type OrgListing struct {
 }
 
 type MemberListing struct {
-	ID              string    `json:"id"`
-	OrgID           string    `json:"org_id"`
-	Role            string    `json:"role"`
-	Email           string    `json:"email"`
-	Name            string    `json:"name"`
-	SupervisorID    string    `json:"supervisor_id"`
-	IsActive        bool      `json:"is_active"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	OrgID        string    `json:"org_id"`
+	Role         string    `json:"role"`
+	Email        string    `json:"email"`
+	Name         string    `json:"name"`
+	SupervisorID string    `json:"supervisor_id"`
+	IsActive     bool      `json:"is_active"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type OauthClient struct {

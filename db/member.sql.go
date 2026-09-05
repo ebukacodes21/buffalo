@@ -13,6 +13,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const countActiveMembersByOrg = `-- name: CountActiveMembersByOrg :one
+SELECT COUNT(*) FROM members_accounts WHERE org_id = $1 AND is_active = true
+`
+
+func (q *Queries) CountActiveMembersByOrg(ctx context.Context, orgID uuid.UUID) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveMembersByOrg, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMembersWithRole = `-- name: CountMembersWithRole :one
 SELECT COUNT(*) FROM members_accounts WHERE org_id = $1 AND role = $2
 `

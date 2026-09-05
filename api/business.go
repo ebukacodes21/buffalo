@@ -65,8 +65,20 @@ func (a *api) apiBusinessOnboard(w http.ResponseWriter, r *http.Request, actor *
 		writeJSONError(w, http.StatusBadRequest, "name, admin_name and admin_email are required")
 		return
 	}
-	if !strings.Contains(req.AdminEmail, "@") {
+	if !safeText(req.OrgName) || hasScriptMarker(req.OrgName) {
+		writeJSONError(w, http.StatusBadRequest, "organization name contains characters that aren't allowed")
+		return
+	}
+	if !lettersOnly(req.AdminName) || hasScriptMarker(req.AdminName) {
+		writeJSONError(w, http.StatusBadRequest, "admin_name may only contain letters, spaces and . ' - & ( )")
+		return
+	}
+	if !validEmail(req.AdminEmail) {
 		writeJSONError(w, http.StatusBadRequest, "admin_email is not a valid email address")
+		return
+	}
+	if req.Slug != "" && !validSlug(req.Slug) {
+		writeJSONError(w, http.StatusBadRequest, "slug may only contain lowercase letters, digits and dashes")
 		return
 	}
 

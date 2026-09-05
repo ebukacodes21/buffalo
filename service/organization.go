@@ -7,11 +7,11 @@ import (
 	"fmt"
 
 	"github.com/ebukacodes21/buffalo/db"
-	"github.com/google/uuid"
+	"github.com/ebukacodes21/buffalo/tooling"
 )
 
 func (b *Buffalo) GetOrgByID(ctx context.Context, orgID string) (*Organization, error) {
-	id, err := uuid.Parse(orgID)
+	id, err := tooling.ParseUUID(orgID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid organisation id: %s, err: %s", orgID, err.Error())
 	}

@@ -20,7 +20,7 @@ func (a *api) jwks(w http.ResponseWriter, r *http.Request) {
 	pubKey := pk.PublicKey
 
 	jwks := service.Jwks{
-		Keys: []service.JwksKey{
+		Keys: []service.Key{
 			{
 				Kid: "buffalo_v1",
 				Alg: "RS256",

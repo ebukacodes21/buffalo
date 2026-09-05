@@ -35,8 +35,8 @@ func (a *api) apiMemberAdd(w http.ResponseWriter, r *http.Request, actor *servic
 		writeJSONError(w, http.StatusBadRequest, "role must be owner, admin or member")
 		return
 	}
-	if req.Email == "" || !strings.Contains(req.Email, "@") {
-		writeJSONError(w, http.StatusBadRequest, "email is required")
+	if !validEmail(req.Email) {
+		writeJSONError(w, http.StatusBadRequest, "email is not a valid email address")
 		return
 	}
 
@@ -49,8 +49,13 @@ func (a *api) apiMemberAdd(w http.ResponseWriter, r *http.Request, actor *servic
 	case err == nil:
 		memberID = existing.ID
 	case strings.Contains(err.Error(), "no rows"):
-		if strings.TrimSpace(req.Name) == "" {
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
 			writeJSONError(w, http.StatusBadRequest, "name is required when creating a new member")
+			return
+		}
+		if !lettersOnly(name) || hasScriptMarker(name) {
+			writeJSONError(w, http.StatusBadRequest, "name may only contain letters, spaces and . ' - & ( )")
 			return
 		}
 		if len(req.Password) < 8 {
@@ -62,7 +67,6 @@ func (a *api) apiMemberAdd(w http.ResponseWriter, r *http.Request, actor *servic
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		name := strings.TrimSpace(req.Name)
 		newMember, err := a.Svc.CreateMember(r.Context(), org.ID, req.Role, req.Email, hash, name,
 			firstWord(name), lastWord(name), req.Email)
 		if err != nil {
