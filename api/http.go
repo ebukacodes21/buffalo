@@ -46,6 +46,7 @@ func Start(httpServer *http.Server, privateKey []byte, config Config, svc *servi
 	mux.HandleFunc("/", a.index)
 	mux.Handle("GET /static/", staticHandler())
 	mux.HandleFunc("/health", a.health)
+	mux.HandleFunc("POST /api/login", a.mobileLogin)
 	mux.HandleFunc("/authorization", a.authorization)
 	mux.HandleFunc("/token", a.token)
 	mux.HandleFunc("/login", a.login)
