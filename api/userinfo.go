@@ -89,6 +89,7 @@ func (a *api) userinfo(w http.ResponseWriter, r *http.Request) {
 			"family_name":        m.FamilyName,
 			"preferred_username": m.PreferredUsername,
 			"picture":            m.Picture,
+			"created_at":         m.CreatedAt,
 			"is_platform_admin":  false,
 			"roles":              rolesForMember(m.Role),
 			"organization":       org,
